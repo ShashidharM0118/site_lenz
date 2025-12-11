@@ -8,8 +8,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     await dotenv.load(fileName: ".env");
+    print('✓ Loaded .env file successfully');
+    print('✓ GEMINI_API_KEY loaded: ${dotenv.env['GEMINI_API_KEY'] != null ? "Yes" : "No"}');
+    print('✓ GROQ_API_KEY loaded: ${dotenv.env['GROQ_API_KEY'] != null ? "Yes" : "No"}');
   } catch (e) {
-    // .env file might not exist, continue anyway
+    print('Warning: Failed to load .env file: $e');
   }
   runApp(const SpeechAIApp());
 }

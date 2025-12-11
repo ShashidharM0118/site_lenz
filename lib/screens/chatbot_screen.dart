@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/groq_service.dart';
 import '../services/openai_service.dart';
+import '../services/gemini_service.dart';
 
 class ChatMessage {
   final String text;
@@ -20,7 +21,7 @@ class ChatMessage {
   });
 }
 
-enum AIService { groq, openai }
+enum AIService { groq, openai, gemini }
 
 class ChatbotScreen extends StatefulWidget {
   const ChatbotScreen({super.key});
@@ -34,6 +35,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   final ScrollController _scrollController = ScrollController();
   final GroqAIService _groqService = GroqAIService();
   final OpenAIService _openAIService = OpenAIService();
+  final GeminiAIService _geminiService = GeminiAIService();
   final ImagePicker _imagePicker = ImagePicker();
   
   List<ChatMessage> _messages = [];
@@ -42,10 +44,12 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   bool _isLoading = false;
   String? _groqApiKey;
   String? _openaiApiKey;
+  String? _geminiApiKey;
   bool _groqInitialized = false;
   bool _openaiInitialized = false;
+  bool _geminiInitialized = false;
   
-  AIService _currentService = AIService.groq;
+  AIService _currentService = AIService.gemini; // Default to Gemini
   
   // Available Groq models
   final List<String> _groqModels = [
@@ -64,7 +68,26 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     'gpt-3.5-turbo',
   ];
   
-  String _selectedModel = 'llama-3.3-70b-versatile';
+  // Available Gemini models
+  final List<String> _geminiModels = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash-live',
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash-live',
+    'gemini-2.5-flash-native-audio-dialog',
+    'gemini-2.5-flash-tts',
+    'gemini-robotics-er-1.5-preview',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+    'gemini-pro',
+    'gemma-3-12b',
+    'gemma-3-27b',
+    'gemma-3-4b',
+    'gemma-3-2b',
+    'gemma-3-1b',
+  ];
+  
+  String _selectedModel = 'gemini-2.5-flash'; // Default to Gemini 2.5 Flash
 
   @override
   void initState() {
@@ -158,6 +181,49 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       });
       _showSnackBar(error);
     };
+
+    // Initialize Gemini
+    try {
+      _geminiApiKey = dotenv.env['GEMINI_API_KEY'];
+      if (_geminiApiKey != null && _geminiApiKey!.isNotEmpty && _geminiApiKey != 'your_api_key_here') {
+        _geminiService.initialize(apiKey: _geminiApiKey);
+        _geminiService.setModel(_selectedModel);
+        _geminiInitialized = _geminiService.isInitialized;
+      } else {
+        _geminiInitialized = false;
+      }
+    } catch (e) {
+      _geminiInitialized = false;
+      debugPrint('Gemini initialization note: $e');
+    }
+
+    _geminiService.onResponse = (response) {
+      setState(() {
+        _messages.add(ChatMessage(
+          text: response,
+          isUser: false,
+          timestamp: DateTime.now(),
+        ));
+        _isLoading = false;
+      });
+      _scrollToBottom();
+    };
+
+    _geminiService.onLoadingStateChange = (isLoading) {
+      setState(() {
+        _isLoading = isLoading;
+      });
+      if (isLoading) {
+        _scrollToBottom();
+      }
+    };
+
+    _geminiService.onError = (error) {
+      setState(() {
+        _isLoading = false;
+      });
+      _showSnackBar(error);
+    };
   }
 
   void _switchService(AIService service) {
@@ -169,15 +235,24 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       if (service == AIService.groq) {
         _selectedModel = _groqModels[0];
         _groqService.setModel(_selectedModel);
-      } else {
+      } else if (service == AIService.openai) {
         _selectedModel = _openaiModels[0];
         _openAIService.setModel(_selectedModel);
+      } else if (service == AIService.gemini) {
+        _selectedModel = _geminiModels[0];
+        _geminiService.setModel(_selectedModel);
       }
     });
   }
 
   List<String> get _availableModels {
-    return _currentService == AIService.groq ? _groqModels : _openaiModels;
+    if (_currentService == AIService.groq) {
+      return _groqModels;
+    } else if (_currentService == AIService.openai) {
+      return _openaiModels;
+    } else {
+      return _geminiModels;
+    }
   }
 
   void _scrollToBottom() {
@@ -264,7 +339,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           return;
         }
       }
-    } else {
+    } else if (_currentService == AIService.openai) {
       if (!_openaiInitialized || _openaiApiKey == null || !_openAIService.isInitialized) {
         try {
           _openaiApiKey = dotenv.env['OPENAI_API_KEY'];
@@ -282,6 +357,27 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           }
         } catch (e) {
           _showSnackBar('Error initializing OpenAI: $e');
+          return;
+        }
+      }
+    } else if (_currentService == AIService.gemini) {
+      if (!_geminiInitialized || _geminiApiKey == null || !_geminiService.isInitialized) {
+        try {
+          _geminiApiKey = dotenv.env['GEMINI_API_KEY'];
+          if (_geminiApiKey != null && _geminiApiKey!.isNotEmpty && _geminiApiKey != 'your_api_key_here') {
+            _geminiService.initialize(apiKey: _geminiApiKey);
+            _geminiService.setModel(_selectedModel);
+            _geminiInitialized = _geminiService.isInitialized;
+            if (!_geminiInitialized) {
+              _showSnackBar('Failed to initialize Gemini service. Please check your API key.');
+              return;
+            }
+          } else {
+            _showSnackBar('Gemini API key not configured. Please set GEMINI_API_KEY in .env file.');
+            return;
+          }
+        } catch (e) {
+          _showSnackBar('Error initializing Gemini: $e');
           return;
         }
       }
@@ -312,8 +408,13 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         messageText.isEmpty ? 'Describe this image' : messageText,
         imageBase64: imagesToSend.isNotEmpty ? imagesToSend : null,
       );
-    } else {
+    } else if (_currentService == AIService.openai) {
       await _openAIService.generateTextFromMessage(
+        messageText.isEmpty ? 'Describe this image' : messageText,
+        imageBase64: imagesToSend.isNotEmpty ? imagesToSend : null,
+      );
+    } else if (_currentService == AIService.gemini) {
+      await _geminiService.generateTextFromMessage(
         messageText.isEmpty ? 'Describe this image' : messageText,
         imageBase64: imagesToSend.isNotEmpty ? imagesToSend : null,
       );
@@ -328,6 +429,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     });
     _groqService.clearHistory();
     _openAIService.clearHistory();
+    _geminiService.clearHistory();
   }
 
   void _onModelChanged(String? newModel) {
@@ -400,6 +502,22 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                       ),
                     ),
                   ),
+                  GestureDetector(
+                    onTap: () => _switchService(AIService.gemini),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _currentService == AIService.gemini
+                            ? Colors.white.withValues(alpha: 0.3)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Text(
+                        'Gemini',
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -427,6 +545,12 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                     displayName = model.replaceAll('gemma', 'G');
                   } else if (model.contains('gpt')) {
                     displayName = model.toUpperCase();
+                  } else if (model.contains('gemini')) {
+                    displayName = model.replaceAll('gemini-', 'G-').replaceAll('-', ' ').toUpperCase();
+                  } else if (model.contains('gemma')) {
+                    displayName = model.replaceAll('gemma-', 'GEMMA-').replaceAll('-', ' ').toUpperCase();
+                  } else {
+                    displayName = model.replaceAll('-', ' ').toUpperCase();
                   }
                   return DropdownMenuItem<String>(
                     value: model,
@@ -514,7 +638,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Start a conversation with ${_currentService == AIService.groq ? "Groq" : "OpenAI"}',
+                          'Start a conversation with ${_currentService == AIService.groq ? "Groq" : _currentService == AIService.openai ? "OpenAI" : "Gemini"}',
                           style: TextStyle(
                             fontSize: 18,
                             color: Colors.grey.shade600,

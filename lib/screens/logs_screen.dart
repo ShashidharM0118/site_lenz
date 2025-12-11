@@ -371,7 +371,10 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
       if (mounted) {
         Navigator.pop(context);
       }
-      _showSnackBar('Error generating report: $e');
+      // Only show snackbar if widget is still mounted
+      if (mounted) {
+        _showSnackBar('Error generating report: $e');
+      }
       debugPrint('Error generating report: $e');
     }
   }
@@ -412,24 +415,44 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
       }
     }
 
-    // Show generating dialog
+    // Show generating dialog with progress
     if (!mounted) return;
 
+    String progressMessage = 'Initializing...';
+    
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 20),
-            Text(
-              'Generating comprehensive report from ${logsWithImages.length} log${logsWithImages.length > 1 ? 's' : ''}...\nThis may take a moment.',
-              textAlign: TextAlign.center,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // Set up progress callback
+          _reportService.onProgressUpdate = (message) {
+            setDialogState(() {
+              progressMessage = message;
+            });
+          };
+          
+          return AlertDialog(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 20),
+                Text(
+                  progressMessage,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Processing ${logsWithImages.length} log${logsWithImages.length > 1 ? 's' : ''}...',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
 
@@ -439,11 +462,14 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
         _reportService.initialize();
       }
 
-      // Generate report content from all logs
+      // Generate report content from all logs (includes image analyses)
+      // This will use the two-stage pipeline: Gemini for images, then Groq for comprehensive report
       String reportContent = await _reportService.generateReportContentFromAllLogs(logsWithImages);
 
-      // Generate PDF
-      final pdfBytes = await _reportService.generatePDFFromAllLogs(
+      // Get image analyses (these are stored during report generation)
+      // We need to regenerate or pass them - let's update the method
+      // For now, generate PDF with the report content
+      final pdfBytes = await _reportService.generatePDFFromAllLogsWithAnalyses(
         reportContent,
         logsWithImages,
         DateTime.now(),
