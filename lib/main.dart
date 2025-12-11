@@ -3,6 +3,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/home_screen.dart';
 import 'screens/chatbot_screen.dart';
 import 'screens/logs_screen.dart';
+import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -27,7 +28,9 @@ class SpeechAIApp extends StatelessWidget {
       title: 'Site Lenz',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const MainNavigationScreen(),
+      home: SplashScreen(
+        child: const MainNavigationScreen(),
+      ),
     );
   }
 }
