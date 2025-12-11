@@ -19,6 +19,7 @@ class GroqAIService {
   bool _isInitialized = false;
   String? _apiKey;
   String _model = 'llama-3.3-70b-versatile'; // Default model - updated from decommissioned version
+  int _maxTokens = 4096; // Increased default for comprehensive reports
   List<Map<String, dynamic>> _conversationHistory = [];
 
   // Callbacks
@@ -28,6 +29,10 @@ class GroqAIService {
 
   void setModel(String model) {
     _model = model;
+  }
+
+  void setMaxTokens(int maxTokens) {
+    _maxTokens = maxTokens;
   }
 
   String get currentModel => _model;
@@ -58,36 +63,25 @@ class GroqAIService {
       return null;
     }
 
+    // Groq API (Llama models) does not support images/vision
+    // Return error if images are provided
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      onError?.call('Groq API does not support image analysis. Please use OpenAI or Gemini for image-based conversations.');
+      return null;
+    }
+
     try {
       onLoadingStateChange?.call(true);
       
       final url = Uri.parse('https://api.groq.com/openai/v1/chat/completions');
       
-      // Build message content
-      dynamic messageContent;
-      if (imageBase64 != null && imageBase64.isNotEmpty) {
-        // Multi-modal message with images
-        List<dynamic> content = [];
-        content.add({'type': 'text', 'text': prompt.isNotEmpty ? prompt : 'Describe this image'});
-        
-        for (String base64Image in imageBase64) {
-          content.add({
-            'type': 'image_url',
-            'image_url': {
-              'url': 'data:image/jpeg;base64,$base64Image'
-            }
-          });
-        }
-        messageContent = content;
-      } else {
-        // Text-only message
-        messageContent = prompt;
-      }
+      // Text-only message (Groq doesn't support images)
+      String messageContent = prompt.isNotEmpty ? prompt : 'Please provide a message.';
 
       // Add user message to history
       _conversationHistory.add({
         'role': 'user',
-        'content': messageContent,
+        'content': messageContent, // Always string for Groq
       });
       
       final response = await http.post(
@@ -100,7 +94,7 @@ class GroqAIService {
           'model': _model,
           'messages': _conversationHistory,
           'temperature': 0.7,
-          'max_tokens': 1024,
+          'max_tokens': _maxTokens, // Use configurable max tokens
         }),
       );
 

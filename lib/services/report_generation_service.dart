@@ -24,6 +24,9 @@ class ReportGenerationService {
   
   // Store image analyses for PDF generation
   List<ImageAnalysisResult> _lastImageAnalyses = [];
+  
+  // Image analysis provider preference
+  ImageAnalysisProvider _imageAnalysisProvider = ImageAnalysisProvider.openai;
 
   void initialize() {
     try {
@@ -51,6 +54,7 @@ class ReportGenerationService {
       if (groqApiKey != null && groqApiKey.isNotEmpty && groqApiKey != 'your_api_key_here') {
         _groqService.initialize(apiKey: groqApiKey);
         _groqService.setModel('llama-3.3-70b-versatile'); // Use largest model for detailed reports
+        _groqService.setMaxTokens(8192); // Set high token limit for comprehensive reports with long conclusion
         _groqInitialized = _groqService.isInitialized; // Verify actual initialization status
         print('✓ Groq initialized: $_groqInitialized');
       } else {
@@ -155,6 +159,11 @@ class ReportGenerationService {
     return reportContent;
   }
 
+  void setImageAnalysisProvider(ImageAnalysisProvider provider) {
+    _imageAnalysisProvider = provider;
+    _imageAnalysisService.setPreferredProvider(provider);
+  }
+
   Future<String> generateReportContentFromAllLogs(List<LogEntry> logs) async {
     // Ensure services are initialized
     if (!_isInitialized) {
@@ -237,7 +246,8 @@ class ReportGenerationService {
     }
 
     // === STAGE 2: COMPREHENSIVE REPORT GENERATION ===
-    onProgressUpdate?.call('Stage 2: Generating comprehensive report with costs and estimates...');
+    onProgressUpdate?.call('Preparing comprehensive analysis...');
+    await Future.delayed(const Duration(milliseconds: 300));
 
     // Combine all transcripts
     String combinedTranscript = allTranscripts.isEmpty 
@@ -356,11 +366,19 @@ class ReportGenerationService {
     promptBuffer.writeln('   - Preventive measures');
     promptBuffer.writeln();
     promptBuffer.writeln('BLOCK E: CONCLUSION');
-    promptBuffer.writeln('Write a professional closing statement (1-2 paragraphs) that:');
-    promptBuffer.writeln('   - Thanks the client for their attention to property maintenance');
-    promptBuffer.writeln('   - Reiterates the importance of addressing safety hazards and major defects');
-    promptBuffer.writeln('   - Offers to answer any questions or provide clarification');
-    promptBuffer.writeln('   - Maintains a professional, courteous tone');
+    promptBuffer.writeln('CRITICAL: Write a comprehensive, professional closing statement that is AT LEAST 400 WORDS (approximately 1 full page).');
+    promptBuffer.writeln('The conclusion must be detailed and thorough, including:');
+    promptBuffer.writeln('   - Thank the client for their attention to property maintenance and safety');
+    promptBuffer.writeln('   - Comprehensive summary of all key findings from the inspection');
+    promptBuffer.writeln('   - Reiterate the critical importance of addressing safety hazards immediately');
+    promptBuffer.writeln('   - Emphasize the significance of major defects and their potential long-term impact');
+    promptBuffer.writeln('   - Provide detailed guidance on prioritizing repairs and maintenance');
+    promptBuffer.writeln('   - Discuss the value of regular inspections and preventive maintenance');
+    promptBuffer.writeln('   - Offer to answer any questions or provide clarification on any section of the report');
+    promptBuffer.writeln('   - Include contact information or next steps if applicable');
+    promptBuffer.writeln('   - Maintain a professional, courteous, and supportive tone throughout');
+    promptBuffer.writeln('   - Ensure the conclusion is substantive, informative, and serves as a comprehensive closing to the report');
+    promptBuffer.writeln('MINIMUM LENGTH: 400+ words. This should fill at least one full page. Be thorough and detailed.');
     promptBuffer.writeln();
     promptBuffer.writeln('IMPORTANT REQUIREMENTS:');
     promptBuffer.writeln('- Use professional building inspection terminology');
@@ -372,17 +390,34 @@ class ReportGenerationService {
     
     String prompt = promptBuffer.toString();
 
-    // Generate comprehensive report using Groq
+    // Generate comprehensive report using Groq (text-only, Groq handles comprehensive text generation)
+    // Temporarily increase max tokens for this large report generation with 400+ word conclusion
+    onProgressUpdate?.call('Generating comprehensive AI report...');
+    await Future.delayed(const Duration(milliseconds: 300));
+    
+    int originalMaxTokens = 4096;
+    _groqService.setMaxTokens(8192); // Use high token limit for comprehensive report with long conclusion
+    
+    onProgressUpdate?.call('AI analyzing defects and creating professional content...');
     String? reportContent = await _groqService.generateText(prompt);
+    
+    // Restore original max tokens after generation
+    _groqService.setMaxTokens(originalMaxTokens);
     
     if (reportContent == null || reportContent.isEmpty) {
       throw Exception('Failed to generate comprehensive report from Groq');
     }
 
+    onProgressUpdate?.call('Report content generated successfully!');
+    await Future.delayed(const Duration(milliseconds: 300));
+
     return reportContent;
   }
 
   Future<Uint8List> generatePDFFromAllLogs(String reportContent, List<LogEntry> logs, DateTime reportDate, List<ImageAnalysisResult> imageAnalyses) async {
+    onProgressUpdate?.call('Creating PDF document structure...');
+    await Future.delayed(const Duration(milliseconds: 300));
+    
     final pdf = pw.Document();
     
     // Collect all images and transcripts
@@ -427,6 +462,9 @@ class ReportGenerationService {
 
     final imageProviders = await loadImages();
 
+    onProgressUpdate?.call('Processing report sections...');
+    await Future.delayed(const Duration(milliseconds: 300));
+
     // Parse report content into sections with error handling
     Map<String, String> sections;
     try {
@@ -436,6 +474,9 @@ class ReportGenerationService {
       print('Error parsing sections: $e'); // Use print instead of debugPrint
       sections = {'REPORT CONTENT': reportContent};
     }
+
+    onProgressUpdate?.call('Formatting professional document layout...');
+    await Future.delayed(const Duration(milliseconds: 300));
 
     // Determine date range
     DateTime? earliestDate = inspectionDates.isNotEmpty ? inspectionDates.reduce((a, b) => a.isBefore(b) ? a : b) : null;
@@ -481,7 +522,8 @@ class ReportGenerationService {
 
             // Detailed Image Analyses with Confidence Scores
             if (imageAnalyses.isNotEmpty) ...[
-              _buildSectionTitle('3. DETAILED IMAGE ANALYSES'),
+              pw.NewPage(),
+              _buildSectionTitle('2. DETAILED IMAGE ANALYSES'),
               pw.SizedBox(height: 10),
               ...imageAnalyses.map((analysis) {
                 // Find corresponding image
@@ -495,45 +537,145 @@ class ReportGenerationService {
               pw.SizedBox(height: 20),
             ],
 
+            // Cost Estimates Section
+            pw.NewPage(),
+            _buildSectionTitle('3. COST ESTIMATES'),
+            pw.SizedBox(height: 10),
+            if (sections.containsKey('COST ESTIMATES') || sections.containsKey('COST ANALYSIS'))
+              _buildSectionContent(sections['COST ESTIMATES'] ?? sections['COST ANALYSIS']!)
+            else
+              _buildPlaceholderContent('Cost estimation data will be generated by AI analysis. Please ensure the AI service is properly configured.'),
+            pw.SizedBox(height: 20),
+
+            // Time Estimates Section
+            _buildSectionTitle('4. TIME ESTIMATES'),
+            pw.SizedBox(height: 10),
+            if (sections.containsKey('TIME ESTIMATES') || sections.containsKey('TIME ANALYSIS'))
+              _buildSectionContent(sections['TIME ESTIMATES'] ?? sections['TIME ANALYSIS']!)
+            else
+              _buildPlaceholderContent('Time estimation data will be generated by AI analysis.'),
+            pw.SizedBox(height: 20),
+
+            // Materials List Section
+            pw.NewPage(),
+            _buildSectionTitle('5. MATERIALS LIST'),
+            pw.SizedBox(height: 10),
+            if (sections.containsKey('MATERIALS LIST') || sections.containsKey('REQUIRED MATERIALS'))
+              _buildSectionContent(sections['MATERIALS LIST'] ?? sections['REQUIRED MATERIALS']!)
+            else
+              _buildPlaceholderContent('Materials list will be generated by AI analysis.'),
+            pw.SizedBox(height: 20),
+
+            // Contractor Recommendations Section
+            _buildSectionTitle('6. CONTRACTOR RECOMMENDATIONS'),
+            pw.SizedBox(height: 10),
+            if (sections.containsKey('CONTRACTOR RECOMMENDATIONS') || sections.containsKey('CONTRACTORS NEEDED'))
+              _buildSectionContent(sections['CONTRACTOR RECOMMENDATIONS'] ?? sections['CONTRACTORS NEEDED']!)
+            else
+              _buildPlaceholderContent('Contractor recommendations will be generated by AI analysis.'),
+            pw.SizedBox(height: 20),
+
             // Detailed Findings
-            if (sections.containsKey('DETAILED FINDINGS')) ...[
-              _buildSectionTitle('4. DETAILED FINDINGS'),
-              pw.SizedBox(height: 10),
-              _buildSectionContent(sections['DETAILED FINDINGS']!),
-              pw.SizedBox(height: 20),
-            ],
+            pw.NewPage(),
+            _buildSectionTitle('7. DETAILED FINDINGS'),
+            pw.SizedBox(height: 10),
+            if (sections.containsKey('DETAILED FINDINGS') || sections.containsKey('FINDINGS'))
+              _buildSectionContent(sections['DETAILED FINDINGS'] ?? sections['FINDINGS']!)
+            else
+              _buildPlaceholderContent('Detailed findings will be generated by AI analysis.'),
+            pw.SizedBox(height: 20),
 
             // Wall Conditions
-            if (sections.containsKey('WALL CONDITIONS')) ...[
-              _buildSectionTitle('5. WALL CONDITIONS'),
-              pw.SizedBox(height: 10),
-              _buildSectionContent(sections['WALL CONDITIONS']!),
-              pw.SizedBox(height: 20),
-            ],
+            _buildSectionTitle('8. WALL CONDITIONS'),
+            pw.SizedBox(height: 10),
+            if (sections.containsKey('WALL CONDITIONS') || sections.containsKey('CONDITION ASSESSMENT'))
+              _buildSectionContent(sections['WALL CONDITIONS'] ?? sections['CONDITION ASSESSMENT']!)
+            else
+              _buildPlaceholderContent('Wall condition assessment will be generated by AI analysis.'),
+            pw.SizedBox(height: 20),
 
             // Recommendations
-            if (sections.containsKey('RECOMMENDATIONS')) ...[
-              _buildSectionTitle('6. RECOMMENDATIONS'),
-              pw.SizedBox(height: 10),
-              _buildSectionContent(sections['RECOMMENDATIONS']!),
-              pw.SizedBox(height: 20),
-            ],
+            pw.NewPage(),
+            _buildSectionTitle('9. RECOMMENDATIONS'),
+            pw.SizedBox(height: 10),
+            if (sections.containsKey('RECOMMENDATIONS'))
+              _buildSectionContent(sections['RECOMMENDATIONS']!)
+            else
+              _buildPlaceholderContent('Recommendations will be generated by AI analysis.'),
+            pw.SizedBox(height: 20),
 
             // Conclusion - BLOCK E
-            if (sections.containsKey('CONCLUSION')) ...[
-              pw.SizedBox(height: 20),
-              pw.Divider(color: PdfColors.grey400, thickness: 1),
-              pw.SizedBox(height: 20),
-              _buildSectionTitle('CONCLUSION'),
-              pw.SizedBox(height: 10),
-              _buildSectionContent(sections['CONCLUSION']!),
-              pw.SizedBox(height: 20),
-            ],
+            pw.NewPage(),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(20),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.blue50,
+                borderRadius: pw.BorderRadius.circular(10),
+                border: pw.Border.all(color: PdfColors.blue200, width: 2),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  _buildSectionTitle('CONCLUSION'),
+                  pw.SizedBox(height: 15),
+                  if (sections.containsKey('CONCLUSION'))
+                    _buildSectionContent(sections['CONCLUSION']!)
+                  else
+                    _buildPlaceholderContent(
+                      'Thank you for your attention to property maintenance and safety. Based on our comprehensive analysis:\n\n'
+                      '• All identified issues should be addressed according to their severity and urgency levels\n'
+                      '• Safety hazards require immediate attention\n'
+                      '• Regular maintenance will help prevent future deterioration\n\n'
+                      'For questions or clarification regarding this report, please contact your inspection professional.'
+                    ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 30),
+            // Inspector signature area
+            pw.Divider(color: PdfColors.grey400, thickness: 1),
+            pw.SizedBox(height: 20),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('Inspector Signature:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                    pw.SizedBox(height: 30),
+                    pw.Container(
+                      width: 200,
+                      height: 1,
+                      color: PdfColors.grey800,
+                    ),
+                    pw.SizedBox(height: 5),
+                    pw.Text('AI-Generated Report', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
+                  ],
+                ),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('Date:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                    pw.SizedBox(height: 30),
+                    pw.Container(
+                      width: 150,
+                      height: 1,
+                      color: PdfColors.grey800,
+                    ),
+                    pw.SizedBox(height: 5),
+                    pw.Text(reportDate.toLocal().toString().split(' ')[0], style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
+                  ],
+                ),
+              ],
+            ),
           ];
         },
       ),
     );
 
+    onProgressUpdate?.call('Finalizing PDF document...');
+    await Future.delayed(const Duration(milliseconds: 300));
+    
     return pdf.save();
   }
 
@@ -700,43 +842,115 @@ class ReportGenerationService {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(
-          'COMPREHENSIVE BUILDING INSPECTION REPORT',
-          style: pw.TextStyle(
-            fontSize: 24,
-            fontWeight: pw.FontWeight.bold,
-            color: PdfColors.blue900,
+        // Professional header with logo placeholder
+        pw.Container(
+          padding: const pw.EdgeInsets.all(20),
+          decoration: pw.BoxDecoration(
+            gradient: pw.LinearGradient(
+              colors: [PdfColors.blue900, PdfColors.blue700],
+            ),
+            borderRadius: pw.BorderRadius.circular(10),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'COMPREHENSIVE BUILDING',
+                style: pw.TextStyle(
+                  fontSize: 28,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.white,
+                  letterSpacing: 2,
+                ),
+              ),
+              pw.Text(
+                'INSPECTION REPORT',
+                style: pw.TextStyle(
+                  fontSize: 28,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.white,
+                  letterSpacing: 2,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Container(
+                width: 100,
+                height: 3,
+                color: PdfColors.amber,
+              ),
+            ],
           ),
         ),
-        pw.SizedBox(height: 10),
-        pw.Divider(color: PdfColors.blue900, thickness: 2),
-        pw.SizedBox(height: 15),
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                if (dateRange.isNotEmpty)
-                  pw.Text(
-                    'Inspection Period: $dateRange',
-                    style: const pw.TextStyle(fontSize: 12),
-                  ),
-                pw.Text(
-                  'Inspection Sessions: $logCount',
-                  style: const pw.TextStyle(fontSize: 12),
+        pw.SizedBox(height: 20),
+        // Report details box
+        pw.Container(
+          padding: const pw.EdgeInsets.all(15),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey100,
+            borderRadius: pw.BorderRadius.circular(8),
+            border: pw.Border.all(color: PdfColors.grey300),
+          ),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    _buildInfoRow('Report Type:', 'Comprehensive Multi-Session Analysis'),
+                    pw.SizedBox(height: 8),
+                    if (dateRange.isNotEmpty)
+                      _buildInfoRow('Inspection Period:', dateRange),
+                    pw.SizedBox(height: 8),
+                    _buildInfoRow('Total Sessions:', '$logCount'),
+                    pw.SizedBox(height: 8),
+                    _buildInfoRow('Images Analyzed:', '$imageCount'),
+                  ],
                 ),
-                pw.Text(
-                  'Images Analyzed: $imageCount',
-                  style: const pw.TextStyle(fontSize: 12),
+              ),
+              pw.SizedBox(width: 20),
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    _buildInfoRow('Report Generated:', reportDate.toLocal().toString().split(' ')[0]),
+                    pw.SizedBox(height: 8),
+                    _buildInfoRow('Generated By:', 'AI-Powered Analysis System'),
+                    pw.SizedBox(height: 8),
+                    _buildInfoRow('Analysis Type:', 'Vision AI + Expert System'),
+                  ],
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _buildInfoRow(String label, String value) {
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Container(
+          width: 120,
+          child: pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.blue900,
             ),
-            pw.Text(
-              'Report Generated: ${reportDate.toLocal().toString().split(' ')[0]}',
-              style: const pw.TextStyle(fontSize: 12),
+          ),
+        ),
+        pw.Expanded(
+          child: pw.Text(
+            value,
+            style: const pw.TextStyle(
+              fontSize: 10,
+              color: PdfColors.black,
             ),
-          ],
+          ),
         ),
       ],
     );
@@ -744,30 +958,67 @@ class ReportGenerationService {
 
   pw.Widget _buildTableOfContents(Map<String, String> sections) {
     return pw.Container(
-      padding: const pw.EdgeInsets.all(15),
+      padding: const pw.EdgeInsets.all(20),
       decoration: pw.BoxDecoration(
-        border: pw.Border.all(color: PdfColors.grey300),
-        borderRadius: pw.BorderRadius.circular(5),
+        color: PdfColors.blue50,
+        border: pw.Border.all(color: PdfColors.blue300, width: 2),
+        borderRadius: pw.BorderRadius.circular(10),
       ),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text(
-            'TABLE OF CONTENTS',
-            style: pw.TextStyle(
-              fontSize: 14,
-              fontWeight: pw.FontWeight.bold,
-            ),
+          pw.Row(
+            children: [
+              pw.Icon(
+                pw.IconData(0xe24d), // document icon
+                size: 20,
+                color: PdfColors.blue900,
+              ),
+              pw.SizedBox(width: 10),
+              pw.Text(
+                'TABLE OF CONTENTS',
+                style: pw.TextStyle(
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.blue900,
+                ),
+              ),
+            ],
           ),
-          pw.SizedBox(height: 10),
+          pw.SizedBox(height: 15),
+          pw.Container(
+            height: 2,
+            color: PdfColors.blue300,
+          ),
+          pw.SizedBox(height: 15),
           ...sections.keys.toList().asMap().entries.map((entry) {
             int index = entry.key + 1;
             String section = entry.value;
             return pw.Padding(
-              padding: const pw.EdgeInsets.only(bottom: 5),
-              child: pw.Text(
-                '$index. $section',
-                style: const pw.TextStyle(fontSize: 11),
+              padding: const pw.EdgeInsets.only(bottom: 8),
+              child: pw.Row(
+                children: [
+                  pw.Container(
+                    width: 30,
+                    child: pw.Text(
+                      '$index.',
+                      style: pw.TextStyle(
+                        fontSize: 11,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.blue700,
+                      ),
+                    ),
+                  ),
+                  pw.Expanded(
+                    child: pw.Text(
+                      section,
+                      style: pw.TextStyle(
+                        fontSize: 11,
+                        color: PdfColors.black,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             );
           }),
@@ -778,17 +1029,28 @@ class ReportGenerationService {
 
   pw.Widget _buildSectionTitle(String title) {
     return pw.Container(
-      padding: const pw.EdgeInsets.all(10),
+      width: double.infinity,
+      padding: const pw.EdgeInsets.symmetric(horizontal: 15, vertical: 12),
       decoration: pw.BoxDecoration(
-        color: PdfColors.blue100,
-        borderRadius: pw.BorderRadius.circular(5),
+        gradient: pw.LinearGradient(
+          colors: [PdfColors.blue800, PdfColors.blue600],
+        ),
+        borderRadius: pw.BorderRadius.circular(8),
+        boxShadow: [
+          pw.BoxShadow(
+            color: PdfColors.grey400,
+            blurRadius: 4,
+            offset: PdfPoint(2, 2),
+          ),
+        ],
       ),
       child: pw.Text(
         title,
         style: pw.TextStyle(
-          fontSize: 16,
+          fontSize: 14,
           fontWeight: pw.FontWeight.bold,
-          color: PdfColors.blue900,
+          color: PdfColors.white,
+          letterSpacing: 0.5,
         ),
       ),
     );
@@ -796,43 +1058,165 @@ class ReportGenerationService {
 
   pw.Widget _buildSectionContent(String content) {
     // Split content into paragraphs and format
-    final paragraphs = content.split('\n\n').where((p) => p.trim().isNotEmpty).toList();
+    final paragraphs = content.split('\n').where((p) => p.trim().isNotEmpty).toList();
     
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: paragraphs.map((para) {
+        String trimmedPara = para.trim();
+        
+        // Check if it's a table row (contains | characters)
+        if (trimmedPara.contains('|') && trimmedPara.split('|').length > 2) {
+          return _buildTableRow(trimmedPara);
+        }
+        
         // Check if it's a bullet point
-        if (para.trim().startsWith('-') || para.trim().startsWith('*')) {
+        if (trimmedPara.startsWith('-') || trimmedPara.startsWith('*') || trimmedPara.startsWith('\u2022')) {
           return pw.Padding(
-            padding: const pw.EdgeInsets.only(left: 20, bottom: 8),
+            padding: const pw.EdgeInsets.only(left: 20, bottom: 6),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('\u2022 ', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                pw.Expanded(
+                  child: pw.Text(
+                    trimmedPara.replaceFirst(RegExp(r'^[-*\u2022]\s*'), ''),
+                    style: const pw.TextStyle(fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        
+        // Check if it's a numbered item
+        if (RegExp(r'^\d+\.').hasMatch(trimmedPara)) {
+          return pw.Padding(
+            padding: const pw.EdgeInsets.only(left: 15, bottom: 6),
             child: pw.Text(
-              para.trim(),
+              trimmedPara,
               style: const pw.TextStyle(fontSize: 11),
             ),
           );
         }
-        // Check if it's a heading (all caps or starts with number)
-        if (para.length < 100 && (para.toUpperCase() == para || RegExp(r'^\d+\.').hasMatch(para))) {
+        
+        // Check if it's a subsection heading (all caps, short length, or ends with colon)
+        if ((trimmedPara.length < 80 && trimmedPara.toUpperCase() == trimmedPara && !trimmedPara.contains('.')) ||
+            (trimmedPara.endsWith(':') && trimmedPara.length < 100)) {
           return pw.Padding(
-            padding: const pw.EdgeInsets.only(bottom: 8),
+            padding: const pw.EdgeInsets.only(top: 10, bottom: 8),
             child: pw.Text(
-              para.trim(),
+              trimmedPara,
               style: pw.TextStyle(
                 fontSize: 12,
                 fontWeight: pw.FontWeight.bold,
+                color: PdfColors.blue800,
               ),
             ),
           );
         }
+        
+        // Check if it contains dollar amounts (cost information)
+        if (trimmedPara.contains(r'$') || trimmedPara.toLowerCase().contains('total cost') || 
+            trimmedPara.toLowerCase().contains('total estimated')) {
+          return pw.Container(
+            padding: const pw.EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            margin: const pw.EdgeInsets.only(bottom: 8),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.green50,
+              borderRadius: pw.BorderRadius.circular(5),
+              border: pw.Border.all(color: PdfColors.green200, width: 1.5),
+            ),
+            child: pw.Text(
+              trimmedPara,
+              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.green900),
+            ),
+          );
+        }
+        
+        // Regular paragraph
         return pw.Padding(
           padding: const pw.EdgeInsets.only(bottom: 8),
           child: pw.Text(
-            para.trim(),
+            trimmedPara,
             style: const pw.TextStyle(fontSize: 11),
             textAlign: pw.TextAlign.justify,
           ),
         );
       }).toList(),
+    );
+  }
+  
+  pw.Widget _buildPlaceholderContent(String message) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(15),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.amber50,
+        borderRadius: pw.BorderRadius.circular(8),
+        border: pw.Border.all(color: PdfColors.amber300, width: 1.5),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Row(
+            children: [
+              pw.Icon(pw.IconData(0xe88e), size: 20, color: PdfColors.amber700), // info icon
+              pw.SizedBox(width: 10),
+              pw.Text(
+                'AI Analysis in Progress',
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.amber900,
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 10),
+          pw.Text(
+            message,
+            style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey800),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  pw.Widget _buildTableRow(String row) {
+    final cells = row.split('|').map((cell) => cell.trim()).where((cell) => cell.isNotEmpty).toList();
+    
+    if (cells.isEmpty) {
+      return pw.SizedBox();
+    }
+    
+    // Check if it's a header row (usually all caps or contains "---")
+    bool isHeader = cells.first.toUpperCase() == cells.first || row.contains('---');
+    
+    if (row.contains('---')) {
+      return pw.SizedBox(height: 2);
+    }
+    
+    return pw.Container(
+      margin: const pw.EdgeInsets.only(bottom: 4),
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        color: isHeader ? PdfColors.blue100 : PdfColors.grey50,
+        border: pw.Border.all(color: PdfColors.grey300),
+      ),
+      child: pw.Row(
+        children: cells.map((cell) {
+          return pw.Expanded(
+            child: pw.Text(
+              cell,
+              style: pw.TextStyle(
+                fontSize: 10,
+                fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
+                color: isHeader ? PdfColors.blue900 : PdfColors.black,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
@@ -976,171 +1360,303 @@ class ReportGenerationService {
   pw.Widget _buildImageAnalysisSection(ImageAnalysisResult analysis, pw.ImageProvider? imageProvider) {
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 20),
-      padding: const pw.EdgeInsets.all(15),
       decoration: pw.BoxDecoration(
-        border: pw.Border.all(color: PdfColors.grey400),
-        borderRadius: pw.BorderRadius.circular(8),
+        color: PdfColors.white,
+        borderRadius: pw.BorderRadius.circular(10),
+        border: pw.Border.all(color: PdfColors.blue300, width: 2),
+        boxShadow: [
+          pw.BoxShadow(
+            color: PdfColors.grey300,
+            blurRadius: 4,
+            offset: PdfPoint(2, 2),
+          ),
+        ],
       ),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          // Image header
-          pw.Text(
-            'IMAGE ${analysis.imageIndex} ANALYSIS',
-            style: pw.TextStyle(
-              fontSize: 14,
-              fontWeight: pw.FontWeight.bold,
-              color: PdfColors.blue900,
-            ),
-          ),
-          pw.SizedBox(height: 10),
-          
-          // Image thumbnail
-          if (imageProvider != null) ...[
-            pw.Center(
-              child: pw.Container(
-                width: 200,
-                child: pw.Image(imageProvider, fit: pw.BoxFit.contain),
+          // Image header with gradient
+          pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              gradient: pw.LinearGradient(
+                colors: [PdfColors.blue700, PdfColors.blue500],
+              ),
+              borderRadius: const pw.BorderRadius.only(
+                topLeft: pw.Radius.circular(8),
+                topRight: pw.Radius.circular(8),
               ),
             ),
-            pw.SizedBox(height: 10),
-          ],
-          
-          // Description
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(
-                'Description: ',
-                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
-              ),
-              pw.Expanded(
-                child: pw.Text(
-                  analysis.description,
-                  style: const pw.TextStyle(fontSize: 10),
-                ),
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 5),
-          
-          // Material Type
-          if (analysis.materialType != null) ...[
-            pw.Row(
+            child: pw.Row(
               children: [
-                pw.Text(
-                  'Material: ',
-                  style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.white,
+                    borderRadius: pw.BorderRadius.circular(5),
+                  ),
+                  child: pw.Text(
+                    'IMAGE ${analysis.imageIndex}',
+                    style: pw.TextStyle(
+                      fontSize: 12,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.blue900,
+                    ),
+                  ),
                 ),
-                pw.Text(
-                  analysis.materialType!,
-                  style: const pw.TextStyle(fontSize: 10),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: pw.Text(
+                    'ANALYSIS REPORT',
+                    style: pw.TextStyle(
+                      fontSize: 12,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.white,
+                    ),
+                  ),
                 ),
               ],
             ),
-            pw.SizedBox(height: 5),
-          ],
-          
-          // Overall Condition
-          pw.Row(
-            children: [
-              pw.Text(
-                'Condition: ',
-                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
-              ),
-              pw.Text(
-                analysis.overallCondition,
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  color: _getConditionColor(analysis.overallCondition),
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ],
           ),
-          pw.SizedBox(height: 10),
           
-          // Defects
-          pw.Text(
-            'Detected Defects:',
-            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
-          ),
-          pw.SizedBox(height: 5),
-          
-          if (analysis.defects.isEmpty)
-            pw.Text(
-              '  No defects detected',
-              style: pw.TextStyle(fontSize: 10, color: PdfColors.green700),
-            )
-          else
-            pw.Table(
-              border: pw.TableBorder.all(color: PdfColors.grey300),
-              columnWidths: {
-                0: const pw.FlexColumnWidth(2),
-                1: const pw.FlexColumnWidth(2),
-                2: const pw.FlexColumnWidth(1.5),
-                3: const pw.FlexColumnWidth(1.5),
-              },
+          pw.Padding(
+            padding: const pw.EdgeInsets.all(15),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                // Header row
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(5),
-                      child: pw.Text('Type', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(5),
-                      child: pw.Text('Location', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(5),
-                      child: pw.Text('Severity', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(5),
-                      child: pw.Text('Confidence', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                    ),
-                  ],
-                ),
-                // Defect rows
-                ...analysis.defects.map((defect) => pw.TableRow(
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(5),
-                      child: pw.Text(defect.type, style: const pw.TextStyle(fontSize: 9)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(5),
-                      child: pw.Text(defect.location, style: const pw.TextStyle(fontSize: 9)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(5),
-                      child: pw.Text(
-                        defect.severity,
-                        style: pw.TextStyle(
-                          fontSize: 9,
-                          color: _getSeverityColor(defect.severity),
-                          fontWeight: pw.FontWeight.bold,
-                        ),
+                // Image thumbnail
+                if (imageProvider != null) ...[
+                  pw.Center(
+                    child: pw.Container(
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border.all(color: PdfColors.grey400, width: 2),
+                        borderRadius: pw.BorderRadius.circular(8),
+                      ),
+                      child: pw.ClipRRect(
+                        horizontalRadius: 6,
+                        verticalRadius: 6,
+                        child: pw.Image(imageProvider, width: 250, fit: pw.BoxFit.contain),
                       ),
                     ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(5),
-                      child: pw.Text(
-                        '${defect.confidenceScore}%',
-                        style: pw.TextStyle(
-                          fontSize: 9,
-                          color: _getConfidenceColor(defect.confidenceScore),
-                          fontWeight: pw.FontWeight.bold,
+                  ),
+                  pw.SizedBox(height: 15),
+                ],
+                
+                // Description
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.blue50,
+                    borderRadius: pw.BorderRadius.circular(5),
+                  ),
+                  child: pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        'Description: ',
+                        style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
+                      ),
+                      pw.Expanded(
+                        child: pw.Text(
+                          analysis.description,
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 8),
+                
+                // Material Type & Condition in a row
+                pw.Row(
+                  children: [
+                    if (analysis.materialType != null) ...[
+                      pw.Expanded(
+                        child: pw.Container(
+                          padding: const pw.EdgeInsets.all(8),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColors.grey100,
+                            borderRadius: pw.BorderRadius.circular(5),
+                            border: pw.Border.all(color: PdfColors.grey300),
+                          ),
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Text(
+                                'MATERIAL',
+                                style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.grey600),
+                              ),
+                              pw.SizedBox(height: 4),
+                              pw.Text(
+                                analysis.materialType!,
+                                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      pw.SizedBox(width: 10),
+                    ],
+                    pw.Expanded(
+                      child: pw.Container(
+                        padding: const pw.EdgeInsets.all(8),
+                        decoration: pw.BoxDecoration(
+                          color: _getConditionBackgroundColor(analysis.overallCondition),
+                          borderRadius: pw.BorderRadius.circular(5),
+                          border: pw.Border.all(color: _getConditionColor(analysis.overallCondition), width: 2),
+                        ),
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(
+                              'CONDITION',
+                              style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.grey600),
+                            ),
+                            pw.SizedBox(height: 4),
+                            pw.Text(
+                              analysis.overallCondition,
+                              style: pw.TextStyle(
+                                fontSize: 10,
+                                color: _getConditionColor(analysis.overallCondition),
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ],
-                )),
+                ),
+                pw.SizedBox(height: 12),
+                
+                // Defects section
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.grey50,
+                    borderRadius: pw.BorderRadius.circular(5),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        'DETECTED DEFECTS',
+                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
+                      ),
+                      pw.SizedBox(height: 8),
+                      
+                      if (analysis.defects.isEmpty)
+                        pw.Container(
+                          padding: const pw.EdgeInsets.all(10),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColors.green50,
+                            borderRadius: pw.BorderRadius.circular(5),
+                            border: pw.Border.all(color: PdfColors.green300),
+                          ),
+                          child: pw.Row(
+                            children: [
+                              pw.Icon(pw.IconData(0xe5ca), size: 16, color: PdfColors.green700),
+                              pw.SizedBox(width: 8),
+                              pw.Text(
+                                'No defects detected - Structure appears sound',
+                                style: pw.TextStyle(fontSize: 10, color: PdfColors.green700, fontWeight: pw.FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        pw.Table(
+                          border: pw.TableBorder.all(color: PdfColors.grey400, width: 1),
+                          columnWidths: {
+                            0: const pw.FlexColumnWidth(2.5),
+                            1: const pw.FlexColumnWidth(2),
+                            2: const pw.FlexColumnWidth(1.5),
+                            3: const pw.FlexColumnWidth(1.5),
+                          },
+                          children: [
+                            // Header row
+                            pw.TableRow(
+                              decoration: pw.BoxDecoration(
+                                gradient: pw.LinearGradient(
+                                  colors: [PdfColors.blue200, PdfColors.blue100],
+                                ),
+                              ),
+                              children: [
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Text('DEFECT TYPE', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                                ),
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Text('LOCATION', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                                ),
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Text('SEVERITY', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                                ),
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Text('CONFIDENCE', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                                ),
+                              ],
+                            ),
+                            // Defect rows
+                            ...analysis.defects.map((defect) => pw.TableRow(
+                              decoration: pw.BoxDecoration(
+                                color: _getSeverityBackgroundColor(defect.severity),
+                              ),
+                              children: [
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Text(defect.type, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                                ),
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Text(defect.location, style: const pw.TextStyle(fontSize: 9)),
+                                ),
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Container(
+                                    padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                    decoration: pw.BoxDecoration(
+                                      color: _getSeverityColor(defect.severity),
+                                      borderRadius: pw.BorderRadius.circular(3),
+                                    ),
+                                    child: pw.Text(
+                                      defect.severity,
+                                      style: const pw.TextStyle(
+                                        fontSize: 8,
+                                        color: PdfColors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.all(6),
+                                  child: pw.Row(
+                                    mainAxisAlignment: pw.MainAxisAlignment.center,
+                                    children: [
+                                      pw.Text(
+                                        '${defect.confidenceScore}%',
+                                        style: pw.TextStyle(
+                                          fontSize: 9,
+                                          color: _getConfidenceColor(defect.confidenceScore),
+                                          fontWeight: pw.FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            )),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
+          ),
         ],
       ),
     );
@@ -1158,6 +1674,18 @@ class ReportGenerationService {
     return PdfColors.grey700;
   }
 
+  PdfColor _getConditionBackgroundColor(String condition) {
+    String conditionLower = condition.toLowerCase();
+    if (conditionLower.contains('excellent') || conditionLower.contains('good')) {
+      return PdfColors.green50;
+    } else if (conditionLower.contains('fair')) {
+      return PdfColors.orange50;
+    } else if (conditionLower.contains('poor') || conditionLower.contains('critical')) {
+      return PdfColors.red50;
+    }
+    return PdfColors.grey50;
+  }
+
   PdfColor _getSeverityColor(String severity) {
     String severityLower = severity.toLowerCase();
     if (severityLower.contains('critical')) {
@@ -1170,6 +1698,20 @@ class ReportGenerationService {
       return PdfColors.yellow700;
     }
     return PdfColors.grey700;
+  }
+
+  PdfColor _getSeverityBackgroundColor(String severity) {
+    String severityLower = severity.toLowerCase();
+    if (severityLower.contains('critical')) {
+      return PdfColors.red50;
+    } else if (severityLower.contains('high')) {
+      return PdfColors.red50;
+    } else if (severityLower.contains('medium')) {
+      return PdfColors.orange50;
+    } else if (severityLower.contains('low')) {
+      return PdfColors.yellow50;
+    }
+    return PdfColors.grey50;
   }
 
   PdfColor _getConfidenceColor(int confidence) {
@@ -1191,14 +1733,22 @@ class ReportGenerationService {
       'SCOPE AND LIMITATIONS',
       'EXECUTIVE SUMMARY',
       'DETAILED IMAGE ANALYSES',
+      'IMAGE ANALYSES',
       'COST ESTIMATES',
+      'COST ANALYSIS',
       'TIME ESTIMATES',
+      'TIME ANALYSIS',
       'MATERIALS LIST',
+      'REQUIRED MATERIALS',
       'CONTRACTOR RECOMMENDATIONS',
+      'CONTRACTORS NEEDED',
       'DETAILED FINDINGS',
+      'FINDINGS',
       'WALL CONDITIONS',
+      'CONDITION ASSESSMENT',
       'RECOMMENDATIONS',
       'CONCLUSION',
+      'SUMMARY',
     ];
 
     String remainingContent = content;
@@ -1281,6 +1831,14 @@ class ReportGenerationService {
     if (sections.isEmpty) {
       sections['REPORT CONTENT'] = content;
     }
+
+    // Debug: Print found sections
+    print('=== PDF SECTIONS PARSED ===');
+    print('Found ${sections.length} sections:');
+    sections.keys.forEach((key) {
+      print('  - $key (${sections[key]!.length} chars)');
+    });
+    print('===========================');
 
     return sections;
   }

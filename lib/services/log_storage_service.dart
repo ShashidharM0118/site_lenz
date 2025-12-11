@@ -55,6 +55,18 @@ class LogStorageService {
     await prefs.remove(_storageKey);
   }
 
+  Future<void> deleteLog(LogEntry entry) async {
+    final prefs = await _prefs();
+    final rawList = prefs.getStringList(_storageKey) ?? [];
+    rawList.removeWhere((item) {
+      final data = jsonDecode(item) as Map<String, dynamic>;
+      return data['createdAt'] == entry.createdAt.toIso8601String() &&
+          data['imagePath'] == entry.imagePath &&
+          data['transcript'] == entry.transcript;
+    });
+    await prefs.setStringList(_storageKey, rawList);
+  }
+
   Future<String> saveImageToLocalDir(File imageFile) async {
     final dir = await getApplicationDocumentsDirectory();
     final ext = imageFile.path.split('.').last;

@@ -4,6 +4,7 @@ import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/log_storage_service.dart';
 import '../services/speech_service.dart';
+import '../theme/app_theme.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -200,18 +201,28 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header - Light blue
+            // Header - Purple theme
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              color: const Color(0xFF4A90E2), // Light blue
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryPurple,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
               child: const Center(
                 child: Text(
-                  'Real-time Transcription',
+                  'Site Lenz',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
                   ),
                 ),
               ),
@@ -303,27 +314,28 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? _handleStopLogging
                     : _handleStartLogging,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4A90E2),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: _speechService.isListening ? AppTheme.primaryPurple : AppTheme.accentGreen,
+                  foregroundColor: _speechService.isListening ? Colors.white : AppTheme.textDark,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  elevation: 0,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(30),
                   ),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      _speechService.isListening ? Icons.stop : Icons.mic,
-                      color: Colors.white,
+                      _speechService.isListening ? Icons.stop_circle : Icons.mic,
+                      size: 24,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     Text(
                       _speechService.isListening ? 'STOP LOGGING' : 'START LOGGING',
                       style: const TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
                       ),
                     ),
                   ],
@@ -331,29 +343,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // Ready message
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.check_circle,
-                    color: Colors.green,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _speechService.isListening
-                        ? 'Recording... Tap STOP to capture and save'
-                        : 'Ready! Tap START to begin transcription',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey.shade700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 16),
 
             // Live Transcript Section
@@ -362,40 +351,49 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4A90E2),
-                  borderRadius: BorderRadius.circular(12),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.borderGrey, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
                 child: Column(
                   children: [
                     // Transcript Header
-                    Padding(
-                      padding: const EdgeInsets.all(12),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryPurple.withOpacity(0.05),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(16),
+                          topRight: Radius.circular(16),
+                        ),
+                      ),
                       child: Row(
                         children: [
-                          const Icon(Icons.text_fields, color: Colors.white),
-                          const SizedBox(width: 8),
+                          Icon(Icons.text_fields, color: AppTheme.primaryPurple, size: 22),
+                          const SizedBox(width: 10),
                           const Text(
                             'Live Transcript',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: AppTheme.primaryPurple,
                               fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
                       ),
                     ),
+                    const Divider(height: 1),
                     // Transcript Content
                     Expanded(
                       child: Container(
                         width: double.infinity,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.only(
-                            bottomLeft: Radius.circular(12),
-                            bottomRight: Radius.circular(12),
-                          ),
-                        ),
                         padding: const EdgeInsets.all(16),
                         child: _transcript.isEmpty
                             ? Center(

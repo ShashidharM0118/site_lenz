@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../services/groq_service.dart';
 import '../services/openai_service.dart';
 import '../services/gemini_service.dart';
+import '../theme/app_theme.dart';
 
 class ChatMessage {
   final String text;
@@ -404,9 +405,17 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
     // Send to selected AI service
     if (_currentService == AIService.groq) {
+      // Groq API doesn't support images - show error if images are provided
+      if (imagesToSend.isNotEmpty) {
+        _showSnackBar('Groq API does not support images. Please use OpenAI or Gemini for image-based conversations.');
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
       await _groqService.generateTextFromMessage(
-        messageText.isEmpty ? 'Describe this image' : messageText,
-        imageBase64: imagesToSend.isNotEmpty ? imagesToSend : null,
+        messageText.isEmpty ? 'Please provide a message.' : messageText,
+        imageBase64: null, // Groq doesn't support images
       );
     } else if (_currentService == AIService.openai) {
       await _openAIService.generateTextFromMessage(
@@ -633,16 +642,18 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                       children: [
                         Icon(
                           Icons.chat_bubble_outline,
-                          size: 64,
-                          color: Colors.grey.shade400,
+                          size: 80,
+                          color: AppTheme.iconGrey.withOpacity(0.5),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 20),
                         Text(
                           'Start a conversation with ${_currentService == AIService.groq ? "Groq" : _currentService == AIService.openai ? "OpenAI" : "Gemini"}',
                           style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey.shade600,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textGrey,
                           ),
+                          textAlign: TextAlign.center,
                         ),
                       ],
                     ),
@@ -710,14 +721,22 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                         decoration: InputDecoration(
                           hintText: 'Type a message...',
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                            borderSide: BorderSide.none,
+                            borderRadius: BorderRadius.circular(30),
+                            borderSide: BorderSide(color: AppTheme.borderGrey, width: 1.5),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(30),
+                            borderSide: BorderSide(color: AppTheme.borderGrey, width: 1.5),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(30),
+                            borderSide: BorderSide(color: AppTheme.primaryPurple, width: 2),
                           ),
                           filled: true,
-                          fillColor: Colors.grey.shade200,
+                          fillColor: Colors.white,
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 20,
-                            vertical: 10,
+                            vertical: 12,
                           ),
                         ),
                         maxLines: null,
@@ -729,11 +748,11 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                     const SizedBox(width: 8),
                     Container(
                       decoration: BoxDecoration(
-                        color: Theme.of(context).primaryColor,
+                        color: AppTheme.accentGreen,
                         shape: BoxShape.circle,
                       ),
                       child: IconButton(
-                        icon: const Icon(Icons.send, color: Colors.white),
+                        icon: Icon(Icons.send, color: AppTheme.textDark),
                         onPressed: _isLoading ? null : _sendMessage,
                       ),
                     ),
@@ -757,8 +776,8 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         children: [
           if (!message.isUser) ...[
             CircleAvatar(
-              backgroundColor: Colors.green.shade100,
-              child: const Icon(Icons.smart_toy, color: Colors.green),
+              backgroundColor: AppTheme.primaryPurple.withOpacity(0.1),
+              child: Icon(Icons.smart_toy, color: AppTheme.primaryPurple, size: 20),
             ),
             const SizedBox(width: 8),
           ],
@@ -772,7 +791,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(16),
                         child: Image.file(
                           File(imagePath),
                           width: 200,
@@ -786,22 +805,26 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   decoration: BoxDecoration(
                     color: message.isUser
-                        ? Theme.of(context).primaryColor
-                        : Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(18).copyWith(
+                        ? AppTheme.primaryPurple
+                        : AppTheme.backgroundColor,
+                    borderRadius: BorderRadius.circular(20).copyWith(
                       bottomRight: message.isUser
                           ? const Radius.circular(4)
-                          : const Radius.circular(18),
+                          : const Radius.circular(20),
                       bottomLeft: message.isUser
-                          ? const Radius.circular(18)
+                          ? const Radius.circular(20)
                           : const Radius.circular(4),
+                    ),
+                    border: Border.all(
+                      color: message.isUser ? Colors.transparent : AppTheme.borderGrey,
+                      width: 1,
                     ),
                   ),
                   child: Text(
                     message.text,
                     style: TextStyle(
-                      color: message.isUser ? Colors.white : Colors.black87,
-                      fontSize: 16,
+                      color: message.isUser ? Colors.white : AppTheme.textDark,
+                      fontSize: 15,
                     ),
                   ),
                 ),
@@ -811,8 +834,8 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           if (message.isUser) ...[
             const SizedBox(width: 8),
             CircleAvatar(
-              backgroundColor: Colors.blue.shade100,
-              child: const Icon(Icons.person, color: Colors.blue),
+              backgroundColor: AppTheme.accentGreen.withOpacity(0.2),
+              child: Icon(Icons.person, color: AppTheme.primaryPurple, size: 20),
             ),
           ],
         ],

@@ -2,6 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/log_storage_service.dart';
 import '../services/report_generation_service.dart';
+import '../services/image_analysis_service.dart';
+import '../widgets/animated_report_loader.dart';
+import '../theme/app_theme.dart';
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key});
@@ -71,14 +74,44 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
     }
   }
 
+  Future<void> _deleteLog(LogEntry log) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Log'),
+        content: const Text('Are you sure you want to delete this log?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _logStorage.deleteLog(log);
+      await _loadLogs();
+      _showSnackBar('Log deleted');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Logs'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh Logs',
+            onPressed: _loadLogs,
+          ),
           if (_logs.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.delete_outline),
@@ -87,13 +120,27 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
             ),
         ],
       ),
-      floatingActionButton: _logs.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: _generateReportFromAllLogs,
-              icon: const Icon(Icons.description),
-              label: const Text('Generate Report\n(All Logs)'),
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
+      bottomNavigationBar: _logs.isNotEmpty
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _generateReportFromAllLogs,
+                  icon: const Icon(Icons.description),
+                  label: const Text(
+                    'Generate Report (All Logs)',
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
             )
           : null,
       body: _isLoading
@@ -103,16 +150,16 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.folder_open, size: 64, color: Colors.grey.shade400),
-                      const SizedBox(height: 12),
+                      Icon(Icons.folder_open, size: 80, color: AppTheme.iconGrey.withOpacity(0.5)),
+                      const SizedBox(height: 16),
                       Text(
                         'No logs yet',
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                        style: TextStyle(color: AppTheme.textGrey, fontSize: 18, fontWeight: FontWeight.w500),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         'Start recording to create logs',
-                        style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                        style: TextStyle(color: AppTheme.textGrey.withOpacity(0.7), fontSize: 14),
                       ),
                     ],
                   ),
@@ -126,31 +173,83 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
                       final log = _logs[index];
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
-                        elevation: 2,
                         child: InkWell(
                           onTap: () {
                             _showLogDetails(log);
                           },
-                          child: ListTile(
-                            leading: _buildThumbnail(log.imagePath),
-                            title: Text(
-                              log.transcript.isEmpty
-                                  ? '(No transcript)'
-                                  : (log.transcript.length > 50
-                                      ? '${log.transcript.substring(0, 50)}...'
-                                      : log.transcript),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text(
-                              _formatDateTime(log.createdAt),
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.description),
-                              color: Colors.blue,
-                              onPressed: () => _generateReport(log),
-                              tooltip: 'Generate Report',
+                          borderRadius: BorderRadius.circular(16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(
+                              children: [
+                                _buildThumbnail(log.imagePath),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        log.transcript.isEmpty
+                                            ? '(No transcript)'
+                                            : (log.transcript.length > 50
+                                                ? '${log.transcript.substring(0, 50)}...'
+                                                : log.transcript),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _formatDateTime(log.createdAt),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: AppTheme.textGrey,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    OutlinedButton(
+                                      onPressed: () => _generateReport(log),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                        side: BorderSide(color: AppTheme.primaryPurple, width: 1.5),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.description, size: 18),
+                                          SizedBox(width: 4),
+                                          Text('Report', style: TextStyle(fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                    OutlinedButton(
+                                      onPressed: () => _deleteLog(log),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        side: const BorderSide(color: Colors.redAccent, width: 1.2),
+                                        foregroundColor: Colors.redAccent,
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.delete_outline, size: 18),
+                                          SizedBox(width: 4),
+                                          Text('Delete', style: TextStyle(fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -185,22 +284,32 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
   Widget _buildThumbnail(String path) {
     final file = File(path);
     if (!file.existsSync()) {
-      return const CircleAvatar(
-        backgroundColor: Colors.grey,
-        child: Icon(Icons.broken_image, color: Colors.white),
+      return Container(
+        width: 60,
+        height: 60,
+        decoration: BoxDecoration(
+          color: AppTheme.borderGrey,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.broken_image, color: AppTheme.iconGrey),
       );
     }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(12),
       child: Image.file(
         file,
-        width: 56,
-        height: 56,
+        width: 60,
+        height: 60,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
-          return const CircleAvatar(
-            backgroundColor: Colors.grey,
-            child: Icon(Icons.broken_image, color: Colors.white),
+          return Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: AppTheme.borderGrey,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.broken_image, color: AppTheme.iconGrey),
           );
         },
       ),
@@ -260,8 +369,10 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   ElevatedButton.icon(
                     onPressed: () {
@@ -269,13 +380,31 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
                       _generateReport(log);
                     },
                     icon: const Icon(Icons.description),
-                    label: const Text('Generate Report'),
+                    label: const Text(
+                      'Generate Report',
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       foregroundColor: Colors.white,
+                      minimumSize: const Size(0, 44),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _deleteLog(log);
+                    },
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Delete Log'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      side: const BorderSide(color: Colors.redAccent, width: 1.2),
+                      foregroundColor: Colors.redAccent,
+                    ),
+                  ),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
                     child: const Text('Close'),
@@ -415,10 +544,50 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
       }
     }
 
+    // Ask user to choose image analysis provider (Gemini or OpenAI)
+    ImageAnalysisProvider? selectedProvider;
+    final providerChoice = await showDialog<ImageAnalysisProvider>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Image Analysis Provider'),
+        content: const Text(
+          'Choose which AI service to use for analyzing images:\n\n'
+          '• OpenAI (Recommended): GPT-4o vision model\n'
+          '• Gemini: Gemini 2.5 Flash vision model\n\n'
+          'Groq will be used for generating the comprehensive report content.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, ImageAnalysisProvider.openai),
+            child: const Text('OpenAI (GPT-4o)'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, ImageAnalysisProvider.gemini),
+            child: const Text('Gemini'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (providerChoice == null) {
+      return; // User cancelled
+    }
+
+    selectedProvider = providerChoice;
+    
+    // Set the selected provider in the report service
+    _reportService.setImageAnalysisProvider(selectedProvider);
+
     // Show generating dialog with progress
     if (!mounted) return;
 
-    String progressMessage = 'Initializing...';
+    String progressMessage = 'Initializing AI systems...';
+    int totalSteps = logsWithImages.length + 5; // Images + report generation stages
+    int currentStep = 0;
     
     showDialog(
       context: context,
@@ -429,28 +598,30 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
           _reportService.onProgressUpdate = (message) {
             setDialogState(() {
               progressMessage = message;
+              
+              // Calculate progress based on message content
+              if (message.contains('Analyzing image')) {
+                // Extract image number if present
+                final match = RegExp(r'(\d+)').firstMatch(message);
+                if (match != null) {
+                  currentStep = int.tryParse(match.group(1) ?? '0') ?? currentStep;
+                }
+              } else if (message.contains('Generating comprehensive report')) {
+                currentStep = logsWithImages.length + 1;
+              } else if (message.contains('Creating PDF')) {
+                currentStep = logsWithImages.length + 2;
+              } else if (message.contains('Formatting')) {
+                currentStep = logsWithImages.length + 3;
+              } else if (message.contains('Finalizing')) {
+                currentStep = logsWithImages.length + 4;
+              }
             });
           };
           
-          return AlertDialog(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(height: 20),
-                Text(
-                  progressMessage,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 14),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Processing ${logsWithImages.length} log${logsWithImages.length > 1 ? 's' : ''}...',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-              ],
-            ),
+          return AnimatedReportLoader(
+            currentMessage: progressMessage,
+            totalSteps: totalSteps,
+            currentStep: currentStep,
           );
         },
       ),

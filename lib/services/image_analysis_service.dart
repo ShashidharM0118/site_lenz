@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'gemini_service.dart';
+import 'openai_service.dart';
 
 class Defect {
   final String type;
@@ -80,22 +81,41 @@ class ImageAnalysisResult {
   };
 }
 
+enum ImageAnalysisProvider { gemini, openai }
+
 class ImageAnalysisService {
   final GeminiAIService _geminiService = GeminiAIService();
+  final OpenAIService _openaiService = OpenAIService();
   bool _isInitialized = false;
+  bool _openaiInitialized = false;
+  ImageAnalysisProvider _preferredProvider = ImageAnalysisProvider.openai; // Default to OpenAI
 
   void initialize() {
     try {
-      final apiKey = dotenv.env['GEMINI_API_KEY'];
-      print('ImageAnalysisService: GEMINI_API_KEY = ${apiKey != null ? "Found" : "NULL"}');
-      if (apiKey != null && apiKey.isNotEmpty && apiKey != 'your_api_key_here') {
-        _geminiService.initialize(apiKey: apiKey);
+      // Initialize Gemini
+      final geminiApiKey = dotenv.env['GEMINI_API_KEY'];
+      print('ImageAnalysisService: GEMINI_API_KEY = ${geminiApiKey != null ? "Found" : "NULL"}');
+      if (geminiApiKey != null && geminiApiKey.isNotEmpty && geminiApiKey != 'your_api_key_here') {
+        _geminiService.initialize(apiKey: geminiApiKey);
         _geminiService.setModel('gemini-2.5-flash'); // Use Gemini 2.5 Flash for vision
         _isInitialized = true;
-        print('✓ ImageAnalysisService initialized successfully');
+        print('✓ ImageAnalysisService (Gemini) initialized successfully');
       } else {
         _isInitialized = false;
-        print('✗ ImageAnalysisService: API key not valid');
+        print('✗ ImageAnalysisService: Gemini API key not valid');
+      }
+      
+      // Initialize OpenAI as fallback
+      final openaiApiKey = dotenv.env['OPENAI_API_KEY'];
+      print('ImageAnalysisService: OPENAI_API_KEY = ${openaiApiKey != null ? "Found" : "NULL"}');
+      if (openaiApiKey != null && openaiApiKey.isNotEmpty && openaiApiKey != 'your_api_key_here') {
+        _openaiService.initialize(apiKey: openaiApiKey);
+        _openaiService.setModel('gpt-4o'); // Use GPT-4o for vision (better than mini for image analysis)
+        _openaiInitialized = true;
+        print('✓ ImageAnalysisService (OpenAI fallback) initialized successfully');
+      } else {
+        _openaiInitialized = false;
+        print('✗ ImageAnalysisService: OpenAI API key not available for fallback');
       }
     } catch (e) {
       _isInitialized = false;
@@ -104,10 +124,11 @@ class ImageAnalysisService {
   }
 
   Future<ImageAnalysisResult> analyzeImage(String imagePath, int imageIndex) async {
-    if (!_isInitialized) {
+    // Initialize services if not already done
+    if (!_isInitialized && !_openaiInitialized) {
       initialize();
-      if (!_isInitialized) {
-        throw Exception('Gemini API key not configured for image analysis');
+      if (!_isInitialized && !_openaiInitialized) {
+        throw Exception('Neither Gemini nor OpenAI API key configured for image analysis');
       }
     }
 
@@ -147,14 +168,74 @@ IMPORTANT:
 - Be thorough and professional
 - Only respond with valid JSON, no additional text''';
 
-    // Call Gemini for analysis
-    String? response = await _geminiService.generateText(prompt, imageBase64: [base64Image]);
+    String? response;
+    String provider = 'Unknown';
 
-    if (response == null || response.isEmpty) {
-      throw Exception('Failed to get image analysis from Gemini');
+    // Use preferred provider first
+    if (_preferredProvider == ImageAnalysisProvider.openai && _openaiInitialized) {
+      try {
+        print('Attempting image analysis with OpenAI (preferred)...');
+        response = await _openaiService.generateText(prompt, imageBase64: [base64Image]);
+        provider = 'OpenAI';
+        
+        if (response != null && response.isNotEmpty) {
+          print('✓ Image analysis successful with OpenAI');
+        }
+      } catch (e) {
+        print('✗ OpenAI image analysis failed: $e');
+        response = null;
+      }
+    } else if (_preferredProvider == ImageAnalysisProvider.gemini && _isInitialized) {
+      try {
+        print('Attempting image analysis with Gemini (preferred)...');
+        response = await _geminiService.generateText(prompt, imageBase64: [base64Image]);
+        provider = 'Gemini';
+        
+        if (response != null && response.isNotEmpty) {
+          print('✓ Image analysis successful with Gemini');
+        }
+      } catch (e) {
+        print('✗ Gemini image analysis failed: $e');
+        response = null;
+      }
     }
 
-    // Parse JSON response
+    // Fallback to the other provider if preferred one failed
+    if ((response == null || response.isEmpty)) {
+      if (_preferredProvider == ImageAnalysisProvider.openai && _isInitialized) {
+        try {
+          print('Falling back to Gemini for image analysis...');
+          response = await _geminiService.generateText(prompt, imageBase64: [base64Image]);
+          provider = 'Gemini';
+          
+          if (response != null && response.isNotEmpty) {
+            print('✓ Image analysis successful with Gemini (fallback)');
+          }
+        } catch (e) {
+          print('✗ Gemini fallback also failed: $e');
+          response = null;
+        }
+      } else if (_preferredProvider == ImageAnalysisProvider.gemini && _openaiInitialized) {
+        try {
+          print('Falling back to OpenAI for image analysis...');
+          response = await _openaiService.generateText(prompt, imageBase64: [base64Image]);
+          provider = 'OpenAI';
+          
+          if (response != null && response.isNotEmpty) {
+            print('✓ Image analysis successful with OpenAI (fallback)');
+          }
+        } catch (e) {
+          print('✗ OpenAI fallback also failed: $e');
+          response = null;
+        }
+      }
+    }
+
+    if (response == null || response.isEmpty) {
+      throw Exception('Failed to get image analysis from both Gemini and OpenAI');
+    }
+
+    // Parse JSON response (works for both Gemini and OpenAI)
     try {
       // Clean response - remove markdown code blocks if present
       String cleanedResponse = response.trim();
@@ -169,22 +250,43 @@ IMPORTANT:
       cleanedResponse = cleanedResponse.trim();
 
       final jsonData = jsonDecode(cleanedResponse) as Map<String, dynamic>;
+      print('✓ Successfully parsed JSON response from $provider');
       return ImageAnalysisResult.fromJson(jsonData, imageIndex);
     } catch (e) {
-      // If JSON parsing fails, create a fallback result
-      print('Warning: Failed to parse JSON response from Gemini. Using fallback. Error: $e');
-      print('Raw response: $response');
+      // If JSON parsing fails, try to extract JSON from the response
+      print('Warning: Failed to parse JSON response from $provider. Attempting to extract JSON... Error: $e');
       
+      // Try to find JSON object in the response
+      try {
+        final jsonMatch = RegExp(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', dotAll: true).firstMatch(response);
+        if (jsonMatch != null) {
+          final jsonStr = jsonMatch.group(0)!;
+          final jsonData = jsonDecode(jsonStr) as Map<String, dynamic>;
+          print('✓ Successfully extracted and parsed JSON from $provider response');
+          return ImageAnalysisResult.fromJson(jsonData, imageIndex);
+        }
+      } catch (e2) {
+        print('✗ Failed to extract JSON from response: $e2');
+      }
+      
+      // Final fallback: create result from text response
+      print('Using text fallback for image analysis from $provider');
       return ImageAnalysisResult(
         imageIndex: imageIndex,
         description: response.length > 500 ? response.substring(0, 500) : response,
         defects: [],
-        overallCondition: 'Unknown - Analysis incomplete',
+        overallCondition: 'Unknown - Analysis incomplete (parsing failed)',
         materialType: 'Unknown',
       );
     }
   }
 
-  bool get isInitialized => _isInitialized;
+  bool get isInitialized => _isInitialized || _openaiInitialized;
+
+  void setPreferredProvider(ImageAnalysisProvider provider) {
+    _preferredProvider = provider;
+  }
+
+  ImageAnalysisProvider get preferredProvider => _preferredProvider;
 }
 
