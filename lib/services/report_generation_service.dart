@@ -285,7 +285,7 @@ class ReportGenerationService {
     // Create comprehensive prompt for Groq
     final StringBuffer promptBuffer = StringBuffer();
     
-    promptBuffer.writeln('You are a professional building inspector creating a comprehensive building inspection report.');
+    promptBuffer.writeln('You are a Certified Master Building Inspector (CMI) and Legal Compliance Officer. You are generating a high-end, legally defensive "Final Home Inspection Report". Your output must be professional, comprehensive, and follow this EXACT structure:');
     promptBuffer.writeln();
     promptBuffer.writeln('=== INSPECTOR TRANSCRIPT/NOTES ===');
     promptBuffer.writeln(userTranscript);
@@ -294,14 +294,19 @@ class ReportGenerationService {
     promptBuffer.writeln('The following ${imageAnalyses.length} images have been analyzed with AI-detected defects and confidence scores:');
     promptBuffer.writeln(formattedImageAnalyses);
     promptBuffer.writeln();
-    promptBuffer.writeln('=== YOUR TASK ===');
-    promptBuffer.writeln('Based on the image analyses and inspector notes, create a comprehensive professional building inspection report with the following sections:');
+    promptBuffer.writeln('=== REPORT STRUCTURE (MUST FOLLOW EXACTLY) ===');
     promptBuffer.writeln();
-    promptBuffer.writeln('1. EXECUTIVE SUMMARY');
-    promptBuffer.writeln('   - Overall property condition');
-    promptBuffer.writeln('   - Critical findings summary');
-    promptBuffer.writeln('   - Risk level (Critical/High/Medium/Low)');
-    promptBuffer.writeln('   - Total defects found across all images');
+    promptBuffer.writeln('BLOCK B: SCOPE & LIMITATIONS (LEGAL PREAMBLE)');
+    promptBuffer.writeln('Start with this section. Include a distinct block titled "SCOPE & LIMITATIONS."');
+    promptBuffer.writeln('Include this EXACT legal text:');
+    promptBuffer.writeln('"This inspection was performed in accordance with current Standards of Practice. It is a non-invasive, visual examination of the readily accessible areas of the building. It is not a warranty, insurance policy, or guarantee of future performance. Latent or concealed defects (e.g., behind drywall, underground) are excluded."');
+    promptBuffer.writeln();
+    promptBuffer.writeln('BLOCK C: EXECUTIVE SUMMARY');
+    promptBuffer.writeln('Write a narrative summary of the property\'s overall health (2-3 paragraphs).');
+    promptBuffer.writeln('Then create TWO specific tables/lists:');
+    promptBuffer.writeln('  1. SAFETY HAZARDS - List all critical safety issues requiring immediate attention');
+    promptBuffer.writeln('  2. MAJOR DEFECTS - List all significant structural or system defects');
+    promptBuffer.writeln('Each item should include: Location, Description, Severity, and Urgency.');
     promptBuffer.writeln();
     promptBuffer.writeln('2. DETAILED IMAGE ANALYSES');
     promptBuffer.writeln('   For each image analyzed:');
@@ -350,10 +355,12 @@ class ReportGenerationService {
     promptBuffer.writeln('   - Long-term considerations');
     promptBuffer.writeln('   - Preventive measures');
     promptBuffer.writeln();
-    promptBuffer.writeln('9. CONCLUSION');
-    promptBuffer.writeln('   - Overall assessment');
-    promptBuffer.writeln('   - Priority action items');
-    promptBuffer.writeln('   - Final recommendations');
+    promptBuffer.writeln('BLOCK E: CONCLUSION');
+    promptBuffer.writeln('Write a professional closing statement (1-2 paragraphs) that:');
+    promptBuffer.writeln('   - Thanks the client for their attention to property maintenance');
+    promptBuffer.writeln('   - Reiterates the importance of addressing safety hazards and major defects');
+    promptBuffer.writeln('   - Offers to answer any questions or provide clarification');
+    promptBuffer.writeln('   - Maintains a professional, courteous tone');
     promptBuffer.writeln();
     promptBuffer.writeln('IMPORTANT REQUIREMENTS:');
     promptBuffer.writeln('- Use professional building inspection terminology');
@@ -450,16 +457,24 @@ class ReportGenerationService {
               pw.SizedBox(height: 20),
             ],
 
-            // Executive Summary
+            // SCOPE & LIMITATIONS (Legal Preamble) - BLOCK B
+            if (sections.containsKey('SCOPE & LIMITATIONS') || sections.containsKey('SCOPE AND LIMITATIONS')) ...[
+              _buildSectionTitle('SCOPE & LIMITATIONS'),
+              pw.SizedBox(height: 10),
+              _buildSectionContent(sections['SCOPE & LIMITATIONS'] ?? sections['SCOPE AND LIMITATIONS'] ?? ''),
+              pw.SizedBox(height: 20),
+            ],
+
+            // Executive Summary - BLOCK C
             if (sections.containsKey('EXECUTIVE SUMMARY')) ...[
-              _buildSectionTitle('1. EXECUTIVE SUMMARY'),
+              _buildSectionTitle('EXECUTIVE SUMMARY'),
               pw.SizedBox(height: 10),
               _buildSectionContent(sections['EXECUTIVE SUMMARY']!),
               pw.SizedBox(height: 20),
             ],
 
             // Property Information
-            _buildSectionTitle('2. PROPERTY INFORMATION'),
+            _buildSectionTitle('PROPERTY INFORMATION'),
             pw.SizedBox(height: 10),
             _buildPropertyInfoForAllLogs(earliestDate, latestDate, logs.length, allImagePaths.length, allTranscripts),
             pw.SizedBox(height: 20),
@@ -504,11 +519,15 @@ class ReportGenerationService {
               pw.SizedBox(height: 20),
             ],
 
-            // Conclusion
+            // Conclusion - BLOCK E
             if (sections.containsKey('CONCLUSION')) ...[
-              _buildSectionTitle('7. CONCLUSION'),
+              pw.SizedBox(height: 20),
+              pw.Divider(color: PdfColors.grey400, thickness: 1),
+              pw.SizedBox(height: 20),
+              _buildSectionTitle('CONCLUSION'),
               pw.SizedBox(height: 10),
               _buildSectionContent(sections['CONCLUSION']!),
+              pw.SizedBox(height: 20),
             ],
           ];
         },
@@ -1168,6 +1187,8 @@ class ReportGenerationService {
     
     // Common section headers - try multiple variations (updated order for new report structure)
     final sectionPatterns = [
+      'SCOPE & LIMITATIONS',
+      'SCOPE AND LIMITATIONS',
       'EXECUTIVE SUMMARY',
       'DETAILED IMAGE ANALYSES',
       'COST ESTIMATES',
