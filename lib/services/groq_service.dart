@@ -37,14 +37,13 @@ class GroqAIService {
       final apiKeyToUse = apiKey ?? '';
       
       if (apiKeyToUse.isEmpty || apiKeyToUse == 'your_api_key_here') {
-        onError?.call('Groq API key is required. Please set your API key.');
+        _isInitialized = false;
         return;
       }
 
       _apiKey = apiKeyToUse;
       _isInitialized = true;
     } catch (e) {
-      onError?.call('Failed to initialize Groq AI: $e');
       _isInitialized = false;
     }
   }

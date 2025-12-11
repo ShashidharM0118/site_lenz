@@ -73,12 +73,19 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   }
 
   void _initializeServices() {
-    // Initialize Groq
-    _groqApiKey = dotenv.env['GROQ_API_KEY'];
-    if (_groqApiKey != null && _groqApiKey!.isNotEmpty && _groqApiKey != 'your_api_key_here') {
-      _groqService.initialize(apiKey: _groqApiKey);
-      _groqService.setModel(_selectedModel);
-      _groqInitialized = true;
+    try {
+      // Initialize Groq
+      _groqApiKey = dotenv.env['GROQ_API_KEY'];
+      if (_groqApiKey != null && _groqApiKey!.isNotEmpty && _groqApiKey != 'your_api_key_here') {
+        _groqService.initialize(apiKey: _groqApiKey);
+        _groqService.setModel(_selectedModel);
+        _groqInitialized = _groqService.isInitialized;
+      } else {
+        _groqInitialized = false;
+      }
+    } catch (e) {
+      _groqInitialized = false;
+      debugPrint('Groq initialization note: $e');
     }
 
     _groqService.onResponse = (response) {
@@ -109,12 +116,19 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       _showSnackBar(error);
     };
 
-    // Initialize OpenAI
-    _openaiApiKey = dotenv.env['OPENAI_API_KEY'];
-    if (_openaiApiKey != null && _openaiApiKey!.isNotEmpty && _openaiApiKey != 'your_api_key_here') {
-      _openAIService.initialize(apiKey: _openaiApiKey);
-      _openAIService.setModel('gpt-4o-mini');
-      _openaiInitialized = true;
+    try {
+      // Initialize OpenAI
+      _openaiApiKey = dotenv.env['OPENAI_API_KEY'];
+      if (_openaiApiKey != null && _openaiApiKey!.isNotEmpty && _openaiApiKey != 'your_api_key_here') {
+        _openAIService.initialize(apiKey: _openaiApiKey);
+        _openAIService.setModel('gpt-4o-mini');
+        _openaiInitialized = _openAIService.isInitialized;
+      } else {
+        _openaiInitialized = false;
+      }
+    } catch (e) {
+      _openaiInitialized = false;
+      debugPrint('OpenAI initialization note: $e');
     }
 
     _openAIService.onResponse = (response) {
@@ -231,25 +245,43 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     // Initialize service if needed
     if (_currentService == AIService.groq) {
       if (!_groqInitialized || _groqApiKey == null || !_groqService.isInitialized) {
-        _groqApiKey = dotenv.env['GROQ_API_KEY'];
-        if (_groqApiKey != null && _groqApiKey!.isNotEmpty && _groqApiKey != 'your_api_key_here') {
-          _groqService.initialize(apiKey: _groqApiKey);
-          _groqService.setModel(_selectedModel);
-          _groqInitialized = true;
-        } else {
-          _showSnackBar('Groq API key not configured. Please set it in .env file.');
+        try {
+          _groqApiKey = dotenv.env['GROQ_API_KEY'];
+          if (_groqApiKey != null && _groqApiKey!.isNotEmpty && _groqApiKey != 'your_api_key_here') {
+            _groqService.initialize(apiKey: _groqApiKey);
+            _groqService.setModel(_selectedModel);
+            _groqInitialized = _groqService.isInitialized;
+            if (!_groqInitialized) {
+              _showSnackBar('Failed to initialize Groq service. Please check your API key.');
+              return;
+            }
+          } else {
+            _showSnackBar('Groq API key not configured. Please set GROQ_API_KEY in .env file.');
+            return;
+          }
+        } catch (e) {
+          _showSnackBar('Error initializing Groq: $e');
           return;
         }
       }
     } else {
       if (!_openaiInitialized || _openaiApiKey == null || !_openAIService.isInitialized) {
-        _openaiApiKey = dotenv.env['OPENAI_API_KEY'];
-        if (_openaiApiKey != null && _openaiApiKey!.isNotEmpty && _openaiApiKey != 'your_api_key_here') {
-          _openAIService.initialize(apiKey: _openaiApiKey);
-          _openAIService.setModel(_selectedModel);
-          _openaiInitialized = true;
-        } else {
-          _showSnackBar('OpenAI API key not configured. Please set it in .env file.');
+        try {
+          _openaiApiKey = dotenv.env['OPENAI_API_KEY'];
+          if (_openaiApiKey != null && _openaiApiKey!.isNotEmpty && _openaiApiKey != 'your_api_key_here') {
+            _openAIService.initialize(apiKey: _openaiApiKey);
+            _openAIService.setModel(_selectedModel);
+            _openaiInitialized = _openAIService.isInitialized;
+            if (!_openaiInitialized) {
+              _showSnackBar('Failed to initialize OpenAI service. Please check your API key.');
+              return;
+            }
+          } else {
+            _showSnackBar('OpenAI API key not configured. Please set OPENAI_API_KEY in .env file.');
+            return;
+          }
+        } catch (e) {
+          _showSnackBar('Error initializing OpenAI: $e');
           return;
         }
       }
