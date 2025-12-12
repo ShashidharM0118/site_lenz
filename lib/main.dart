@@ -4,6 +4,7 @@ import 'screens/home_screen.dart';
 import 'screens/chatbot_screen.dart';
 import 'screens/logs_screen.dart';
 import 'screens/splash_screen.dart';
+import 'screens/location_screen.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -29,8 +30,11 @@ class SpeechAIApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: SplashScreen(
-        child: const MainNavigationScreen(),
+        child: const LocationScreen(),
       ),
+      routes: {
+        '/main': (context) => const MainNavigationScreen(),
+      },
     );
   }
 }

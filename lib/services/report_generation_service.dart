@@ -11,11 +11,13 @@ import 'gemini_service.dart';
 import 'groq_service.dart';
 import 'image_analysis_service.dart';
 import 'log_storage_service.dart';
+import 'location_service.dart';
 
 class ReportGenerationService {
   final GeminiAIService _geminiService = GeminiAIService();
   final GroqAIService _groqService = GroqAIService();
   final ImageAnalysisService _imageAnalysisService = ImageAnalysisService();
+  final LocationService _locationService = LocationService();
   bool _isInitialized = false;
   bool _groqInitialized = false;
   
@@ -329,6 +331,27 @@ class ReportGenerationService {
   }
 
   Future<String> _generateComprehensiveReport(List<ImageAnalysisResult> imageAnalyses, String userTranscript, String formattedImageAnalyses) async {
+    // Get location data for region-specific cost adjustments
+    Map<String, dynamic>? locationData = await _locationService.getSavedLocation();
+    String locationInfo = '';
+    String costAdjustmentNote = '';
+    double costMultiplier = 1.0;
+    
+    if (locationData != null) {
+      locationInfo = locationData['fullAddress'] ?? '';
+      String region = locationData['region'] ?? '';
+      costMultiplier = _locationService.getCostMultiplier(region);
+      String laborInfo = _locationService.getLaborRateInfo(region);
+      
+      costAdjustmentNote = '''
+=== LOCATION-BASED COST ADJUSTMENT ===
+Property Location: $locationInfo
+Cost Multiplier: ${(costMultiplier * 100).toStringAsFixed(0)}% of base rates
+Labor Rates: $laborInfo
+Note: All costs in this report are adjusted for the local market based on the property location.
+''';
+    }
+    
     // Create comprehensive prompt for Groq with enhanced system instructions
     final StringBuffer promptBuffer = StringBuffer();
     
@@ -337,6 +360,16 @@ class ReportGenerationService {
     promptBuffer.writeln('You specialize in comprehensive building assessments, cost estimation, and regulatory compliance.');
     promptBuffer.writeln('Your reports are used for insurance claims, litigation, and major construction decisions.');
     promptBuffer.writeln();
+    
+    if (locationInfo.isNotEmpty) {
+      promptBuffer.writeln('=== PROPERTY LOCATION ===');
+      promptBuffer.writeln('Inspection Location: $locationInfo');
+      promptBuffer.writeln('Cost Multiplier: ${costMultiplier.toStringAsFixed(2)}x base rates');
+      promptBuffer.writeln('${_locationService.getLaborRateInfo(locationData?['region'])}');
+      promptBuffer.writeln('IMPORTANT: Apply this ${(costMultiplier * 100).toStringAsFixed(0)}% multiplier to ALL cost estimates.');
+      promptBuffer.writeln();
+    }
+    
     promptBuffer.writeln('=== CRITICAL INSTRUCTIONS ===');
     promptBuffer.writeln('1. You MUST generate ALL sections in ONE SINGLE RESPONSE');
     promptBuffer.writeln('2. COMPLETE the ENTIRE report before returning any response');
