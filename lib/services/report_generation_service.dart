@@ -230,9 +230,10 @@ class ReportGenerationService {
     
     // Launch all image analyses in parallel
     for (int i = 0; i < allImagePaths.length; i++) {
+      final imageIndex = i + 1;
       analysisFutures.add(
-        _imageAnalysisService.analyzeImage(allImagePaths[i], i + 1).catchError((e) {
-          print('Warning: Failed to analyze image ${i + 1}: $e');
+        _imageAnalysisService.analyzeImage(allImagePaths[i], imageIndex).then<ImageAnalysisResult?>((result) => result).catchError((e) {
+          print('Warning: Failed to analyze image $imageIndex: $e');
           return null;
         })
       );
@@ -331,265 +332,159 @@ class ReportGenerationService {
   }
 
   Future<String> _generateComprehensiveReport(List<ImageAnalysisResult> imageAnalyses, String userTranscript, String formattedImageAnalyses) async {
-    // Get location data for region-specific cost adjustments
+    // Get location data
     Map<String, dynamic>? locationData = await _locationService.getSavedLocation();
-    String locationInfo = '';
-    String costAdjustmentNote = '';
+    String locationInfo = locationData?['fullAddress'] ?? 'Property Location';
     double costMultiplier = 1.0;
     
     if (locationData != null) {
-      locationInfo = locationData['fullAddress'] ?? '';
       String region = locationData['region'] ?? '';
       costMultiplier = _locationService.getCostMultiplier(region);
-      String laborInfo = _locationService.getLaborRateInfo(region);
+    }
+    
+    int totalDefects = imageAnalyses.fold(0, (sum, analysis) => sum + analysis.defects.length);
+    
+    // HYBRID APPROACH: Try AI enhancement, fallback to template-based generation
+    onProgressUpdate?.call('Generating comprehensive report...');
+    
+    String report = '';
+    
+    try {
+      // Try AI-enhanced generation
+      report = await _generateAIEnhancedReport(imageAnalyses, userTranscript, formattedImageAnalyses, locationInfo, costMultiplier, totalDefects);
+      print('✓ AI-enhanced report generated successfully');
+    } catch (e) {
+      print('AI generation failed: $e');
+      print('Falling back to template-based report...');
+      onProgressUpdate?.call('Generating structured report (template mode)...');
       
-      costAdjustmentNote = '''
-=== LOCATION-BASED COST ADJUSTMENT ===
-Property Location: $locationInfo
-Cost Multiplier: ${(costMultiplier * 100).toStringAsFixed(0)}% of base rates
-Labor Rates: $laborInfo
-Note: All costs in this report are adjusted for the local market based on the property location.
-''';
+      // Fallback to template-based report - ALWAYS WORKS
+      report = _generateTemplateReport(imageAnalyses, userTranscript, locationInfo, costMultiplier, totalDefects);
+      print('✓ Template-based report generated successfully');
     }
     
-    // Create comprehensive prompt for Groq with enhanced system instructions
-    final StringBuffer promptBuffer = StringBuffer();
+    onProgressUpdate?.call('Report generation complete!');
+    return report;
+  }
+  
+  Future<String> _generateAIEnhancedReport(List<ImageAnalysisResult> imageAnalyses, String userTranscript, String formattedImageAnalyses, String locationInfo, double costMultiplier, int totalDefects) async {
+    // Try to enhance report with Gemini AI
+    final StringBuffer prompt = StringBuffer();
     
-    promptBuffer.writeln('=== SYSTEM ROLE ===');
-    promptBuffer.writeln('You are a Certified Master Building Inspector (CMI), Structural Engineer, and Legal Compliance Officer with 20+ years of experience.');
-    promptBuffer.writeln('You specialize in comprehensive building assessments, cost estimation, and regulatory compliance.');
-    promptBuffer.writeln('Your reports are used for insurance claims, litigation, and major construction decisions.');
-    promptBuffer.writeln();
+    prompt.writeln('You are a professional building inspector. Generate a comprehensive inspection report.');
+    prompt.writeln();
+    prompt.writeln('PROPERTY: $locationInfo');
+    prompt.writeln('IMAGES ANALYZED: ${imageAnalyses.length}');
+    prompt.writeln('DEFECTS FOUND: $totalDefects');
+    prompt.writeln('INSPECTOR NOTES: $userTranscript');
+    prompt.writeln();
+    prompt.writeln('IMAGE ANALYSIS RESULTS:');
+    prompt.writeln(formattedImageAnalyses);
+    prompt.writeln();
+    prompt.writeln('Generate 9 sections: Scope & Limitations, Executive Summary, Detailed Findings, Cost Estimates, Time Estimates, Materials List, Contractor Recommendations, Recommendations, Conclusion.');
+    prompt.writeln('Include specific costs (2025 market rates), timelines, and professional recommendations.');
+    prompt.writeln('Make it comprehensive and professional. Use real numbers, not placeholders.');
     
-    if (locationInfo.isNotEmpty) {
-      promptBuffer.writeln('=== PROPERTY LOCATION ===');
-      promptBuffer.writeln('Inspection Location: $locationInfo');
-      promptBuffer.writeln('Cost Multiplier: ${costMultiplier.toStringAsFixed(2)}x base rates');
-      promptBuffer.writeln('${_locationService.getLaborRateInfo(locationData?['region'])}');
-      promptBuffer.writeln('IMPORTANT: Apply this ${(costMultiplier * 100).toStringAsFixed(0)}% multiplier to ALL cost estimates.');
-      promptBuffer.writeln();
+    try {
+      String? content = await _geminiService.generateText(prompt.toString());
+      
+      if (content != null && content.isNotEmpty && content.length > 500) {
+        print('✓ AI-enhanced report: ${content.length} chars');
+        return content;
+      } else {
+        print('AI response too short or empty, using template fallback');
+        throw Exception('AI response insufficient');
+      }
+    } catch (e) {
+      print('AI enhancement failed: $e - will use template');
+      // Don't throw - let caller handle fallback
+      throw e;
+    }
+  }
+  
+  String _generateTemplateReport(List<ImageAnalysisResult> imageAnalyses, String userTranscript, String locationInfo, double costMultiplier, int totalDefects) {
+    // TEMPLATE-BASED REPORT - ALWAYS WORKS, NEVER FAILS
+    final StringBuffer report = StringBuffer();
+    final now = DateTime.now();
+    
+    // SECTION 1: SCOPE & LIMITATIONS
+    report.writeln('SCOPE & LIMITATIONS');
+    report.writeln();
+    report.writeln('This inspection was performed in accordance with current Standards of Practice. It is a non-invasive, visual examination of the readily accessible areas of the building. It is not a warranty, insurance policy, or guarantee of future performance. Latent or concealed defects (e.g., behind drywall, underground) are excluded.');
+    report.writeln();
+    report.writeln('This inspection covered ${imageAnalyses.length} area(s) of the property using visual assessment and photographic documentation. The inspection methodology included systematic examination of accessible surfaces, structural elements, and visible building components. Digital imaging technology was employed to capture detailed visual records of observed conditions.');
+    report.writeln();
+    report.writeln('The scope of this inspection is limited to readily accessible and visible components. Areas concealed by finishes, furnishings, or structural elements were not examined. This inspection does not include destructive testing, laboratory analysis, or specialized equipment beyond standard photographic documentation.');
+    report.writeln();
+    
+    // SECTION 2: EXECUTIVE SUMMARY
+    report.writeln('EXECUTIVE SUMMARY');
+    report.writeln();
+    
+    if (totalDefects > 0) {
+      report.writeln('This inspection identified $totalDefects defect(s) requiring attention across ${imageAnalyses.length} examined area(s). The findings range from minor cosmetic issues to items requiring professional repair. Detailed analysis and recommendations are provided in subsequent sections.');
+      report.writeln();
+      report.writeln('The overall condition assessment indicates that while the property shows signs of wear consistent with age and use, the identified issues can be addressed through systematic repairs and preventive maintenance. Priority should be given to items affecting structural integrity and safety.');
+    } else {
+      report.writeln('This inspection examined ${imageAnalyses.length} area(s) of the property. No major defects or safety hazards were identified during this visual examination. The property appears to be in satisfactory condition, with normal wear patterns consistent with age and use.');
+      report.writeln();
+      report.writeln('While no immediate repairs are required, routine maintenance and periodic inspections are recommended to preserve the property\'s condition and prevent future deterioration.');
+    }
+    report.writeln();
+    
+    // Defects table
+    if (totalDefects > 0) {
+      report.writeln('MAJOR DEFECTS IDENTIFIED:');
+      report.writeln('| Location | Defect Type | Severity | Recommended Action |');
+      report.writeln('|----------|-------------|----------|-------------------|');
+      
+      for (var analysis in imageAnalyses) {
+        for (var defect in analysis.defects) {
+          report.writeln('| ${defect.location} | ${defect.type} | ${defect.severity} | Professional repair recommended |');
+        }
+      }
+      report.writeln();
     }
     
-    promptBuffer.writeln('=== CRITICAL INSTRUCTIONS ===');
-    promptBuffer.writeln('1. You MUST generate ALL sections in ONE SINGLE RESPONSE');
-    promptBuffer.writeln('2. COMPLETE the ENTIRE report before returning any response');
-    promptBuffer.writeln('3. EVERY section MUST be fully written with detailed, specific content');
-    promptBuffer.writeln('4. NO section should say "AI Analysis in Progress" or "Will be generated" or be left empty');
-    promptBuffer.writeln('5. Generate REAL, SPECIFIC data for costs, times, materials, and contractors based on the defects found');
-    promptBuffer.writeln('6. Use the image analysis data provided to create realistic estimates');
-    promptBuffer.writeln('7. If specific defects are found, calculate actual repair costs based on 2025 industry standards');
-    promptBuffer.writeln('8. Include multiple items in each section (minimum 5-10 items per section)');
-    promptBuffer.writeln('9. Be thorough, detailed, and professional throughout - this is a COMPLETE report');
-    promptBuffer.writeln('10. Generate ALL 9 sections (Scope, Executive Summary, Cost Estimates, Time Estimates, Materials, Contractors, Findings, Recommendations, Conclusion)');
-    promptBuffer.writeln();
-    promptBuffer.writeln('=== INPUT DATA ===');
-    promptBuffer.writeln();
-    promptBuffer.writeln('INSPECTOR TRANSCRIPT/NOTES:');
-    promptBuffer.writeln(userTranscript);
-    promptBuffer.writeln();
-    promptBuffer.writeln(formattedImageAnalyses);
-    promptBuffer.writeln();
-    promptBuffer.writeln('=== OUTPUT FORMAT - GENERATE ALL SECTIONS BELOW ===');
-    promptBuffer.writeln('You must write the complete report with ALL sections filled out.');
-    promptBuffer.writeln();
+    // SECTION 3: DETAILED FINDINGS
+    report.writeln('DETAILED FINDINGS');
+    report.writeln();
     
-    promptBuffer.writeln('SCOPE & LIMITATIONS');
-    promptBuffer.writeln('Write 3-4 paragraphs covering:');
-    promptBuffer.writeln('- Include this EXACT legal text first: "This inspection was performed in accordance with current Standards of Practice. It is a non-invasive, visual examination of the readily accessible areas of the building. It is not a warranty, insurance policy, or guarantee of future performance. Latent or concealed defects (e.g., behind drywall, underground) are excluded."');
-    promptBuffer.writeln('- Scope of the inspection performed');
-    promptBuffer.writeln('- Areas examined and inspection methodology');
-    promptBuffer.writeln('- Limitations and exclusions');
-    promptBuffer.writeln('- Standards and guidelines followed');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('EXECUTIVE SUMMARY');
-    promptBuffer.writeln('Write 3-4 comprehensive paragraphs summarizing:');
-    promptBuffer.writeln('- Overall property condition assessment');
-    promptBuffer.writeln('- Key findings and concerns');
-    promptBuffer.writeln('- Priority recommendations');
-    promptBuffer.writeln('Then create detailed tables/lists:');
-    promptBuffer.writeln('  SAFETY HAZARDS TABLE:');
-    promptBuffer.writeln('  For EACH safety hazard found, list:');
-    promptBuffer.writeln('    * Location (specific room/area)');
-    promptBuffer.writeln('    * Hazard description (detailed)');
-    promptBuffer.writeln('    * Severity (Critical/High/Medium)');
-    promptBuffer.writeln('    * Urgency (Immediate/Within 24hrs/Within 1 week)');
-    promptBuffer.writeln('  MAJOR DEFECTS TABLE:');
-    promptBuffer.writeln('  For EACH major defect found, list:');
-    promptBuffer.writeln('    * Location');
-    promptBuffer.writeln('    * Defect description');
-    promptBuffer.writeln('    * Severity level');
-    promptBuffer.writeln('    * Recommended action');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('COST ESTIMATES');
-    promptBuffer.writeln('MANDATORY: Generate COMPLETE cost breakdown for ALL defects found.');
-    promptBuffer.writeln('For EACH defect/repair item, provide:');
-    promptBuffer.writeln('Format as a detailed table:');
-    promptBuffer.writeln('| Repair Item | Location | Material Cost | Labor Cost | Total Cost |');
-    promptBuffer.writeln('Example entries:');
-    promptBuffer.writeln('- Wall crack repair (structural): Material \$150-200, Labor \$300-400, Total: \$450-600');
-    promptBuffer.writeln('- Paint touch-up (10 sq ft): Material \$25-35, Labor \$75-100, Total: \$100-135');
-    promptBuffer.writeln('- Plaster repair (damaged area): Material \$80-120, Labor \$200-300, Total: \$280-420');
-    promptBuffer.writeln('MUST INCLUDE:');
-    promptBuffer.writeln('- Minimum 5-10 repair items with specific costs');
-    promptBuffer.writeln('- Line item for each defect found in images');
-    promptBuffer.writeln('- Subtotals for different categories (structural, cosmetic, etc.)');
-    promptBuffer.writeln('- TOTAL ESTIMATED COST at the end (sum all items)');
-    promptBuffer.writeln('- Include 10-15% contingency for unforeseen issues');
-    promptBuffer.writeln('Use realistic market rates for 2025. Be specific with dollar amounts.');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('TIME ESTIMATES');
-    promptBuffer.writeln('MANDATORY: Generate COMPLETE time breakdown for ALL repairs.');
-    promptBuffer.writeln('For EACH repair task, specify:');
-    promptBuffer.writeln('Format as a detailed table:');
-    promptBuffer.writeln('| Repair Task | Duration | Crew Size | Best Time to Complete |');
-    promptBuffer.writeln('Example entries:');
-    promptBuffer.writeln('- Structural crack repair: 2-3 days (2 workers)');
-    promptBuffer.writeln('- Surface prep and painting: 1-2 days (1 worker)');
-    promptBuffer.writeln('- Plaster repair and finishing: 3-4 days (2 workers, includes drying time)');
-    promptBuffer.writeln('MUST INCLUDE:');
-    promptBuffer.writeln('- Time estimate for EACH cost item listed above');
-    promptBuffer.writeln('- Crew size needed');
-    promptBuffer.writeln('- Weather/seasonal considerations if applicable');
-    promptBuffer.writeln('- TOTAL ESTIMATED TIME (accounting for sequential vs parallel work)');
-    promptBuffer.writeln('- Critical path items that affect overall timeline');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('MATERIALS LIST');
-    promptBuffer.writeln('MANDATORY: Generate COMPLETE itemized materials list.');
-    promptBuffer.writeln('Format as a comprehensive table:');
-    promptBuffer.writeln('| Material Name | Quantity | Unit Cost | Total Cost | Application/Purpose |');
-    promptBuffer.writeln('MUST INCLUDE materials for ALL repairs mentioned in cost estimates:');
-    promptBuffer.writeln('Examples:');
-    promptBuffer.writeln('- Structural epoxy/resin: 2 gallons @ \$45/gal = \$90 (crack injection)');
-    promptBuffer.writeln('- Interior paint (premium): 3 gallons @ \$38/gal = \$114 (wall coverage)');
-    promptBuffer.writeln('- Plaster/joint compound: 50 lbs @ \$18/bag = \$90 (wall repairs)');
-    promptBuffer.writeln('- Primer/sealer: 2 gallons @ \$28/gal = \$56 (surface prep)');
-    promptBuffer.writeln('- Sandpaper (various grits): 1 set @ \$25 = \$25 (surface finishing)');
-    promptBuffer.writeln('- Painter\'s tape: 3 rolls @ \$8/roll = \$24 (edge protection)');
-    promptBuffer.writeln('Include: cement, mortar, fasteners, adhesives, paints, sealants, etc.');
-    promptBuffer.writeln('List minimum 10-15 material items with specific quantities and costs.');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('CONTRACTOR RECOMMENDATIONS');
-    promptBuffer.writeln('MANDATORY: List ALL contractor types needed for the repairs.');
-    promptBuffer.writeln('For EACH contractor type, specify:');
-    promptBuffer.writeln('Format as detailed entries:');
-    promptBuffer.writeln('| Contractor Type | Required For | Urgency | Estimated Cost | Credentials Needed |');
-    promptBuffer.writeln('MUST INCLUDE (based on defects found):');
-    promptBuffer.writeln('- Structural Engineer (if structural issues): Reason, Urgency, \$500-1000 for assessment');
-    promptBuffer.writeln('- Licensed Mason/Masonry Contractor: Reason, Urgency, cost estimate');
-    promptBuffer.writeln('- Professional Painter: Reason, Urgency, cost estimate');
-    promptBuffer.writeln('- Plasterer/Drywall Specialist: Reason, Urgency, cost estimate');
-    promptBuffer.writeln('- General Contractor/Project Manager: Reason, Urgency, cost estimate');
-    promptBuffer.writeln('Include minimum 5-8 contractor types with specific rationale for each.');
-    promptBuffer.writeln('Specify required licenses, certifications, or specializations.');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('DETAILED FINDINGS');
-    promptBuffer.writeln('Write comprehensive analysis (4-6 paragraphs) covering:');
-    promptBuffer.writeln('- Structural integrity assessment of all elements examined');
-    promptBuffer.writeln('- Surface condition analysis (cracks, deterioration, damage patterns)');
-    promptBuffer.writeln('- Material assessment (age, quality, degradation)');
-    promptBuffer.writeln('- Patterns observed across multiple images/areas');
-    promptBuffer.writeln('- Root cause analysis for identified issues');
-    promptBuffer.writeln('- Interconnected issues that may affect multiple systems');
-    promptBuffer.writeln('Be specific, technical, and reference image analysis data.');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('RECOMMENDATIONS');
-    promptBuffer.writeln('Organize in priority order with 3-4 paragraphs for EACH category:');
-    promptBuffer.writeln('IMMEDIATE ACTIONS (Critical - Within 24-48 hours):');
-    promptBuffer.writeln('  - List specific actions with detailed reasoning');
-    promptBuffer.writeln('  - Include safety implications');
-    promptBuffer.writeln('  - Specify temporary measures if needed');
-    promptBuffer.writeln('SHORT-TERM MAINTENANCE (Within 1-3 months):');
-    promptBuffer.writeln('  - Prioritized list of repairs');
-    promptBuffer.writeln('  - Rationale for each recommendation');
-    promptBuffer.writeln('  - Consequences of delaying action');
-    promptBuffer.writeln('LONG-TERM CONSIDERATIONS (3-12 months):');
-    promptBuffer.writeln('  - Preventive maintenance recommendations');
-    promptBuffer.writeln('  - Monitoring requirements');
-    promptBuffer.writeln('  - Future inspection schedule');
-    promptBuffer.writeln('Be specific and actionable for each recommendation.');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('CONCLUSION');
-    promptBuffer.writeln('CRITICAL: Write a comprehensive, professional conclusion of AT LEAST 500 WORDS.');
-    promptBuffer.writeln('This must be a COMPLETE, FULLY-WRITTEN conclusion, not a placeholder.');
-    promptBuffer.writeln('Structure as 6-8 detailed paragraphs covering:');
-    promptBuffer.writeln('Paragraph 1: Thank the client and acknowledge property ownership responsibilities');
-    promptBuffer.writeln('Paragraph 2: Comprehensive summary of ALL key findings (be specific, reference actual defects found)');
-    promptBuffer.writeln('Paragraph 3: Reiterate critical safety hazards and immediate action items');
-    promptBuffer.writeln('Paragraph 4: Discuss major defects, long-term implications, and repair priority');
-    promptBuffer.writeln('Paragraph 5: Financial summary - total costs, budgeting advice, potential ROI of repairs');
-    promptBuffer.writeln('Paragraph 6: Timeline guidance and project management recommendations');
-    promptBuffer.writeln('Paragraph 7: Value of preventive maintenance and regular inspections');
-    promptBuffer.writeln('Paragraph 8: Closing remarks, offer support, contact information, professional signature');
-    promptBuffer.writeln('MINIMUM 500 WORDS. Make it substantive, informative, and professionally written.');
-    promptBuffer.writeln('This should be a complete, detailed narrative that provides closure to the report.');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('=== FORMATTING REQUIREMENTS ===');
-    promptBuffer.writeln('- Use clear section headers (all caps for main sections)');
-    promptBuffer.writeln('- Use bullet points (-) for lists');
-    promptBuffer.writeln('- Use numbered lists (1., 2., 3.) for sequential steps');
-    promptBuffer.writeln('- Include table-like formatting with | separators where specified');
-    promptBuffer.writeln('- Separate sections with blank lines');
-    promptBuffer.writeln('- Be consistent with terminology and formatting throughout');
-    promptBuffer.writeln();
-    
-    promptBuffer.writeln('=== QUALITY STANDARDS ===');
-    promptBuffer.writeln('- NO incomplete sections or placeholders');
-    promptBuffer.writeln('- ALL costs must be realistic 2025 market rates');
-    promptBuffer.writeln('- ALL recommendations must be specific and actionable');
-    promptBuffer.writeln('- Use proper building inspection terminology');
-    promptBuffer.writeln('- Cross-reference between sections for consistency');
-    promptBuffer.writeln('- Ensure all numbers, dates, and figures are accurate');
-    
-    String prompt = promptBuffer.toString();
-
-    // Generate comprehensive report using Groq (text-only, Groq handles comprehensive text generation)
-    // Use maximum tokens for this detailed report generation
-    onProgressUpdate?.call('Generating comprehensive AI report (all sections)...');
-    await Future.delayed(const Duration(milliseconds: 300));
-    
-    int originalMaxTokens = 4096;
-    _groqService.setMaxTokens(16384); // Use maximum token limit for comprehensive detailed report
-    
-    onProgressUpdate?.call('Groq AI writing complete report with all sections...');
-    String? reportContent = await _groqService.generateText(prompt);
-    
-    // Restore original max tokens after generation
-    _groqService.setMaxTokens(originalMaxTokens);
-    
-    if (reportContent == null || reportContent.isEmpty) {
-      throw Exception('Failed to generate comprehensive report from Groq');
-    }
-
-    // Validate that key sections exist in the generated content
-    final requiredSections = ['COST ESTIMATES', 'TIME ESTIMATES', 'MATERIALS LIST', 'CONTRACTOR RECOMMENDATIONS', 'CONCLUSION'];
-    final missingSections = <String>[];
-    
-    for (var section in requiredSections) {
-      if (!reportContent.toUpperCase().contains(section)) {
-        missingSections.add(section);
+    for (var analysis in imageAnalyses) {
+      report.writeln('IMAGE ${analysis.imageIndex} ANALYSIS:');
+      report.writeln('Material Type: ${analysis.materialType ?? "General building materials"}');
+      report.writeln('Overall Condition: ${analysis.overallCondition}');
+      report.writeln('Description: ${analysis.description}');
+      report.writeln();
+      
+      if (analysis.defects.isNotEmpty) {
+        report.writeln('Defects Observed:');
+        for (var defect in analysis.defects) {
+          report.writeln('- ${defect.type}: ${defect.description}');
+          report.writeln('  Location: ${defect.location}');
+          report.writeln('  Severity: ${defect.severity}');
+          report.writeln('  Confidence: ${defect.confidenceScore}%');
+        }
+        report.writeln();
       }
     }
     
-    if (missingSections.isNotEmpty) {
-      print('WARNING: Generated report is missing sections: ${missingSections.join(", ")}');
-      print('Report length: ${reportContent.length} characters');
-      // Still return the content, but log the warning
+    if (userTranscript.trim().isNotEmpty) {
+      report.writeln('INSPECTOR NOTES:');
+      report.writeln(userTranscript);
+      report.writeln();
     }
-
-    onProgressUpdate?.call('Verified all sections generated successfully!');
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    return reportContent;
+    
+    report.writeln(_generateCostSection(imageAnalyses, costMultiplier));
+    report.writeln(_generateTimeSection(imageAnalyses));
+    report.writeln(_generateMaterialsSection(imageAnalyses));
+    report.writeln(_generateContractorsSection(imageAnalyses));
+    report.writeln(_generateRecommendationsSection(imageAnalyses, totalDefects));
+    report.writeln(_generateConclusionSection(imageAnalyses, totalDefects, locationInfo));
+    
+    return report.toString();
   }
+  
 
   Future<Uint8List> generatePDFFromAllLogs(String reportContent, List<LogEntry> logs, DateTime reportDate, List<ImageAnalysisResult> imageAnalyses) async {
     // Verify report content before generating PDF
@@ -647,6 +542,11 @@ Note: All costs in this report are adjusted for the local market based on the pr
 
     final imageProviders = await loadImages();
 
+    // Validate inputs before processing
+    if (imageAnalyses.isEmpty) {
+      print('WARNING: No image analyses provided for PDF generation');
+    }
+    
     onProgressUpdate?.call('Processing report sections...');
     await Future.delayed(const Duration(milliseconds: 300));
 
@@ -654,9 +554,15 @@ Note: All costs in this report are adjusted for the local market based on the pr
     Map<String, String> sections;
     try {
       sections = _parseReportSections(reportContent);
+      print('Successfully parsed ${sections.length} sections for PDF');
     } catch (e) {
       // If parsing fails, put all content in a single section
-      print('Error parsing sections: $e'); // Use print instead of debugPrint
+      print('Error parsing sections: $e');
+      sections = {'REPORT CONTENT': reportContent};
+    }
+    
+    // Ensure sections is not empty
+    if (sections.isEmpty) {
       sections = {'REPORT CONTENT': reportContent};
     }
 
@@ -1936,106 +1842,285 @@ Note: All costs in this report are adjusted for the local market based on the pr
     }
   }
 
+  // TEMPLATE SECTION GENERATORS - ALWAYS WORK, NEVER FAIL
+  
+  String _generateCostSection(List<ImageAnalysisResult> imageAnalyses, double costMultiplier) {
+    final StringBuffer section = StringBuffer();
+    section.writeln('COST ESTIMATES');
+    section.writeln();
+    section.writeln('| Repair Item | Location | Material Cost | Labor Cost | Total Cost |');
+    section.writeln('|-------------|----------|---------------|------------|------------|');
+    
+    double totalCost = 0;
+    int itemCount = 0;
+    
+    for (var analysis in imageAnalyses) {
+      for (var defect in analysis.defects) {
+        itemCount++;
+        // Generate realistic costs based on defect severity
+        double baseMaterialCost = defect.severity.toLowerCase().contains('high') ? 200 : 
+                                   defect.severity.toLowerCase().contains('medium') ? 120 : 80;
+        double baseLaborCost = baseMaterialCost * 2.5;
+        
+        double materialCost = baseMaterialCost * costMultiplier;
+        double laborCost = baseLaborCost * costMultiplier;
+        double itemTotal = materialCost + laborCost;
+        totalCost += itemTotal;
+        
+        section.writeln('| ${defect.type} | ${defect.location} | \$${materialCost.toStringAsFixed(0)} | \$${laborCost.toStringAsFixed(0)} | \$${itemTotal.toStringAsFixed(0)} |');
+      }
+    }
+    
+    if (itemCount == 0) {
+      // No defects - add routine maintenance items
+      section.writeln('| Routine inspection & touch-up | General | \$150 | \$200 | \$350 |');
+      section.writeln('| Preventive maintenance | Exterior | \$100 | \$150 | \$250 |');
+      section.writeln('| Surface cleaning | Interior | \$75 | \$125 | \$200 |');
+      totalCost = 800;
+    }
+    
+    double contingency = totalCost * 0.12;
+    section.writeln('| Contingency (12%) | All areas | - | - | \$${contingency.toStringAsFixed(0)} |');
+    section.writeln('| **GRAND TOTAL** | - | - | - | **\$${(totalCost + contingency).toStringAsFixed(0)}** |');
+    section.writeln();
+    
+    return section.toString();
+  }
+  
+  String _generateTimeSection(List<ImageAnalysisResult> imageAnalyses) {
+    final StringBuffer section = StringBuffer();
+    section.writeln('TIME ESTIMATES');
+    section.writeln();
+    section.writeln('| Task | Duration | Crew Size | Notes |');
+    section.writeln('|------|----------|-----------|-------|');
+    
+    int totalDays = 0;
+    
+    for (var analysis in imageAnalyses) {
+      for (var defect in analysis.defects) {
+        int days = defect.severity.toLowerCase().contains('high') ? 3 :
+                   defect.severity.toLowerCase().contains('medium') ? 2 : 1;
+        int crew = days >= 2 ? 2 : 1;
+        totalDays += days;
+        
+        section.writeln('| ${defect.type} repair | $days days | $crew workers | ${defect.location} |');
+      }
+    }
+    
+    if (totalDays == 0) {
+      section.writeln('| Routine maintenance | 1 day | 1 worker | General upkeep |');
+      totalDays = 1;
+    }
+    
+    section.writeln('| **TOTAL PROJECT TIME** | **$totalDays days** | - | Accounting for sequential work |');
+    section.writeln();
+    
+    return section.toString();
+  }
+  
+  String _generateMaterialsSection(List<ImageAnalysisResult> imageAnalyses) {
+    final StringBuffer section = StringBuffer();
+    section.writeln('MATERIALS LIST');
+    section.writeln();
+    section.writeln('| Material | Quantity | Unit Cost | Total | Application |');
+    section.writeln('|----------|----------|-----------|-------|-------------|');
+    
+    // Standard materials for typical repairs
+    section.writeln('| Structural epoxy/resin | 2 gallons | \$48/gal | \$96 | Crack injection & bonding |');
+    section.writeln('| Interior paint (premium) | 3 gallons | \$38/gal | \$114 | Surface coverage |');
+    section.writeln('| Plaster/joint compound | 50 lbs | \$19/bag | \$95 | Wall repairs |');
+    section.writeln('| Primer/sealer | 2 gallons | \$32/gal | \$64 | Surface preparation |');
+    section.writeln('| Sandpaper assortment | 1 set | \$28 | \$28 | Surface finishing |');
+    section.writeln('| Painter\'s tape | 4 rolls | \$9/roll | \$36 | Edge protection |');
+    section.writeln('| Drop cloths/tarps | 3 units | \$18/unit | \$54 | Surface protection |');
+    section.writeln('| Mixing containers | 5 units | \$6/unit | \$30 | Material preparation |');
+    section.writeln('| Application tools | 1 set | \$75 | \$75 | Brushes, rollers, trowels |');
+    section.writeln('| Cleaning supplies | 1 set | \$35 | \$35 | Site cleanup |');
+    section.writeln('| Safety equipment | 1 set | \$45 | \$45 | PPE for workers |');
+    section.writeln('| Fasteners/hardware | Assorted | \$25 | \$25 | General repairs |');
+    section.writeln('| **TOTAL MATERIALS** | - | - | **\$697** | - |');
+    section.writeln();
+    
+    return section.toString();
+  }
+  
+  String _generateContractorsSection(List<ImageAnalysisResult> imageAnalyses) {
+    final StringBuffer section = StringBuffer();
+    section.writeln('CONTRACTOR RECOMMENDATIONS');
+    section.writeln();
+    section.writeln('| Contractor Type | Required For | Urgency | Estimated Cost | Required Credentials |');
+    section.writeln('|----------------|--------------|---------|----------------|---------------------|');
+    
+    bool hasStructuralIssues = imageAnalyses.any((a) => 
+      a.defects.any((d) => d.type.toLowerCase().contains('crack') || d.severity.toLowerCase().contains('high'))
+    );
+    
+    if (hasStructuralIssues) {
+      section.writeln('| Structural Engineer | Assessment & approval | High | \$800-1200 | PE License required |');
+    }
+    
+    section.writeln('| Licensed Contractor | General repairs | Medium | \$2000-4000 | State general contractor license |');
+    section.writeln('| Mason/Concrete Specialist | Surface repairs | Medium | \$1500-3000 | Masonry certification |');
+    section.writeln('| Professional Painter | Finish work | Low | \$800-1500 | Insurance & references |');
+    section.writeln('| Plasterer/Drywall Tech | Surface finishing | Medium | \$1000-2000 | Trade certification |');
+    section.writeln('| Project Manager | Coordination | Medium | \$1200-2500 | PM certification preferred |');
+    section.writeln('| Quality Inspector | Final verification | Low | \$400-600 | Building inspector license |');
+    section.writeln();
+    
+    return section.toString();
+  }
+  
+  String _generateRecommendationsSection(List<ImageAnalysisResult> imageAnalyses, int totalDefects) {
+    final StringBuffer section = StringBuffer();
+    section.writeln('RECOMMENDATIONS');
+    section.writeln();
+    
+    section.writeln('IMMEDIATE ACTIONS (24-48 hours):');
+    bool hasHighSeverity = imageAnalyses.any((a) => a.defects.any((d) => d.severity.toLowerCase().contains('high') || d.severity.toLowerCase().contains('critical')));
+    
+    if (hasHighSeverity) {
+      section.writeln('- Engage a licensed structural engineer to assess critical defects identified in this report');
+      section.writeln('- Document all high-severity issues with additional photography');
+      section.writeln('- Implement temporary safety measures if any areas pose immediate risk');
+      section.writeln('- Obtain repair estimates from licensed contractors');
+    } else {
+      section.writeln('- No immediate critical actions required');
+      section.writeln('- Schedule contractor consultations within the next week');
+      section.writeln('- Document current conditions for future reference');
+    }
+    section.writeln();
+    
+    section.writeln('SHORT-TERM REPAIRS (1-3 months):');
+    section.writeln('- Address all identified defects in order of severity');
+    section.writeln('- Obtain necessary permits for structural or significant repairs');
+    section.writeln('- Schedule work during favorable weather conditions');
+    section.writeln('- Implement quality control measures during repairs');
+    section.writeln('- Document all repair work with before/after photography');
+    section.writeln();
+    
+    section.writeln('LONG-TERM MAINTENANCE (3-12 months):');
+    section.writeln('- Establish regular inspection schedule (semi-annual recommended)');
+    section.writeln('- Monitor repaired areas for any recurring issues');
+    section.writeln('- Implement preventive maintenance program');
+    section.writeln('- Maintain detailed records of all maintenance and repairs');
+    section.writeln('- Consider protective coatings or treatments for vulnerable areas');
+    section.writeln();
+    
+    return section.toString();
+  }
+  
+  String _generateConclusionSection(List<ImageAnalysisResult> imageAnalyses, int totalDefects, String locationInfo) {
+    final StringBuffer section = StringBuffer();
+    section.writeln('CONCLUSION');
+    section.writeln();
+    
+    section.writeln('Thank you for commissioning this professional building inspection. This comprehensive report has been prepared to provide you with a thorough understanding of the current condition of your property at $locationInfo and to guide your decision-making regarding necessary repairs and maintenance.');
+    section.writeln();
+    
+    if (totalDefects > 0) {
+      section.writeln('Our inspection has identified $totalDefects specific issue(s) requiring attention. While these findings may initially seem concerning, they represent opportunities to enhance and preserve your property\'s value through systematic, well-planned repairs. Each identified defect has been documented with detailed analysis, severity assessment, and confidence ratings to help you prioritize your response.');
+      section.writeln();
+      section.writeln('The defects identified range across different severity levels. High-severity items demand prompt professional attention to prevent further deterioration and potential safety concerns. Medium and lower-severity issues, while not immediately critical, should be addressed within the recommended timeframes to prevent escalation and minimize long-term repair costs. Delaying necessary repairs typically results in more extensive and expensive remediation down the line.');
+    } else {
+      section.writeln('Our inspection has revealed that your property is in generally good condition with no major defects or safety concerns identified during this visual examination. This is a positive finding that reflects well on the property\'s construction quality and maintenance history. However, it is important to remember that no building is maintenance-free, and ongoing care remains essential.');
+      section.writeln();
+      section.writeln('While no significant issues were found, routine maintenance and periodic professional inspections remain crucial for long-term property preservation. Regular monitoring allows for early detection of potential problems before they become serious issues, ultimately saving time and money while maintaining property value.');
+    }
+    section.writeln();
+    
+    section.writeln('The cost estimates and timelines provided in this report are based on current market rates and standard industry practices. Actual costs may vary depending on contractor selection, material choices, and specific site conditions. We recommend obtaining multiple quotes from licensed, insured contractors before commencing any repair work. The investment in quality repairs now will pay dividends through enhanced property value, improved safety, and reduced long-term maintenance costs.');
+    section.writeln();
+    
+    section.writeln('Regarding project timeline, the repairs can be staged according to priority levels as outlined in our recommendations section. This phased approach allows you to manage costs effectively while ensuring critical items receive prompt attention. Working with experienced contractors who understand building systems will ensure repairs are completed correctly and efficiently.');
+    section.writeln();
+    
+    section.writeln('Regular preventive maintenance is the foundation of property preservation. Establishing a systematic maintenance schedule, conducting periodic inspections, and addressing minor issues promptly will significantly extend the service life of building components and systems. We recommend scheduling follow-up inspections annually or whenever significant changes or concerns arise.');
+    section.writeln();
+    
+    section.writeln('This report is intended to serve as a comprehensive resource for understanding your property\'s current condition and planning appropriate action. Should you have questions about any findings, require clarification on recommended repairs, or need guidance on contractor selection, please do not hesitate to contact us. We are committed to ensuring you have the information and support needed to make informed decisions about your property.');
+    section.writeln();
+    
+    section.writeln('We appreciate the opportunity to provide this professional inspection service and wish you success in maintaining and enhancing your property. Proper care and attention to the items outlined in this report will ensure your building remains safe, functional, and valuable for years to come.');
+    section.writeln();
+    section.writeln('Respectfully submitted,');
+    section.writeln('Certified Building Inspector');
+    section.writeln('Site Lenz Professional Inspection Services');
+    section.writeln();
+    
+    return section.toString();
+  }
+
   Map<String, String> _parseReportSections(String content) {
     Map<String, String> sections = {};
     
-    // Common section headers - try multiple variations (updated order for new report structure)
+    // Common section headers - try multiple variations
     final sectionPatterns = [
-      'SCOPE & LIMITATIONS',
       'SCOPE AND LIMITATIONS',
+      'SCOPE & LIMITATIONS',
       'EXECUTIVE SUMMARY',
-      'DETAILED IMAGE ANALYSES',
-      'IMAGE ANALYSES',
-      'COST ESTIMATES',
-      'COST ANALYSIS',
-      'TIME ESTIMATES',
-      'TIME ANALYSIS',
-      'MATERIALS LIST',
-      'REQUIRED MATERIALS',
-      'CONTRACTOR RECOMMENDATIONS',
-      'CONTRACTORS NEEDED',
       'DETAILED FINDINGS',
-      'FINDINGS',
-      'WALL CONDITIONS',
-      'CONDITION ASSESSMENT',
+      'COST ESTIMATES',
+      'TIME ESTIMATES',
+      'MATERIALS LIST',
+      'CONTRACTOR RECOMMENDATIONS',
       'RECOMMENDATIONS',
       'CONCLUSION',
-      'SUMMARY',
     ];
 
-    String remainingContent = content;
-    
+    // SIMPLER APPROACH: Use indexOf instead of complex regex to avoid errors
     for (int i = 0; i < sectionPatterns.length; i++) {
       final pattern = sectionPatterns[i];
+      final patternUpper = pattern.toUpperCase();
+      final contentUpper = content.toUpperCase();
       
-      // Try multiple regex patterns to find the section
-      List<RegExp> regexPatterns = [
-        // Pattern with number prefix: "1. EXECUTIVE SUMMARY"
-        RegExp(r'(?i)^\s*(\d+\.)?\s*' + _escapeRegex(pattern) + r'[:\-]?\s*$', multiLine: true),
-        // Pattern without number: "EXECUTIVE SUMMARY"
-        RegExp(r'(?i)^\s*' + _escapeRegex(pattern) + r'[:\-]?\s*$', multiLine: true),
-        // Pattern as part of text
-        RegExp(r'(?i)(?:^|\n)\s*(\d+\.)?\s*' + _escapeRegex(pattern) + r'[:\-]?\s*\n?', multiLine: true),
-      ];
+      // Find section header (case-insensitive)
+      int startIndex = contentUpper.indexOf(patternUpper);
       
-      RegExpMatch? match;
-      RegExp? matchedRegex;
-      
-      for (var regex in regexPatterns) {
-        try {
-          match = regex.firstMatch(remainingContent);
-          if (match != null) {
-            matchedRegex = regex;
-            break;
-          }
-        } catch (e) {
-          // Continue to next pattern if this one fails
-          continue;
+      if (startIndex == -1) {
+        // Try alternative patterns
+        if (pattern.contains('&')) {
+          startIndex = contentUpper.indexOf(pattern.replaceAll('&', 'AND'));
+        } else if (pattern.contains('AND')) {
+          startIndex = contentUpper.indexOf(pattern.replaceAll('AND', '&'));
         }
       }
       
-      if (match != null && matchedRegex != null) {
-        final startIndex = match.end;
+      if (startIndex != -1) {
+        // Move past the header line
+        int contentStart = content.indexOf('\n', startIndex);
+        if (contentStart == -1) contentStart = startIndex + pattern.length;
+        else contentStart++;
         
-        // Find the next section or end of content
-        String sectionContent;
+        // Bounds check
+        if (contentStart >= content.length) continue;
         
-        if (i < sectionPatterns.length - 1) {
-          // Try to find the next section
-          final nextPattern = sectionPatterns[i + 1];
-          List<RegExp> nextRegexPatterns = [
-            RegExp(r'(?i)^\s*(\d+\.)?\s*' + _escapeRegex(nextPattern) + r'[:\-]?\s*$', multiLine: true),
-            RegExp(r'(?i)^\s*' + _escapeRegex(nextPattern) + r'[:\-]?\s*$', multiLine: true),
-            RegExp(r'(?i)(?:^|\n)\s*(\d+\.)?\s*' + _escapeRegex(nextPattern) + r'[:\-]?\s*\n?', multiLine: true),
-          ];
+        // Find where this section ends (next section header or end of content)
+        int contentEnd = content.length;
+        
+        // Look for next section
+        for (int j = i + 1; j < sectionPatterns.length; j++) {
+          final nextPattern = sectionPatterns[j].toUpperCase();
+          int nextIndex = contentUpper.indexOf(nextPattern, contentStart);
           
-          RegExpMatch? nextMatch;
-          for (var nextRegex in nextRegexPatterns) {
-            try {
-              nextMatch = nextRegex.firstMatch(remainingContent.substring(startIndex));
-              if (nextMatch != null) {
-                break;
-              }
-            } catch (e) {
-              continue;
-            }
+          if (nextIndex == -1 && nextPattern.contains('&')) {
+            nextIndex = contentUpper.indexOf(nextPattern.replaceAll('&', 'AND'), contentStart);
+          } else if (nextIndex == -1 && nextPattern.contains('AND')) {
+            nextIndex = contentUpper.indexOf(nextPattern.replaceAll('AND', '&'), contentStart);
           }
           
-          if (nextMatch != null) {
-            sectionContent = remainingContent.substring(startIndex, startIndex + nextMatch.start).trim();
-          } else {
-            sectionContent = remainingContent.substring(startIndex).trim();
+          if (nextIndex != -1 && nextIndex < contentEnd) {
+            contentEnd = nextIndex;
+            break;
           }
-        } else {
-          sectionContent = remainingContent.substring(startIndex).trim();
         }
         
-        if (sectionContent.isNotEmpty) {
-          sections[pattern] = sectionContent;
+        // Extract section content with bounds check
+        if (contentStart < contentEnd && contentEnd <= content.length) {
+          String sectionContent = content.substring(contentStart, contentEnd).trim();
+          if (sectionContent.isNotEmpty) {
+            sections[pattern] = sectionContent;
+          }
         }
-        
-        // Update remaining content to search from where we found this section
-        remainingContent = remainingContent.substring(startIndex + sectionContent.length);
       }
     }
 
@@ -2057,7 +2142,8 @@ Note: All costs in this report are adjusted for the local market based on the pr
 
   String _escapeRegex(String pattern) {
     // Escape special regex characters but preserve spaces as \s+
-    return pattern
+    // NOTE: & does not need escaping in regex
+    String escaped = pattern
         .replaceAll(r'\', r'\\')
         .replaceAll(r'.', r'\.')
         .replaceAll(r'*', r'\*')
@@ -2073,6 +2159,7 @@ Note: All costs in this report are adjusted for the local market based on the pr
         .replaceAll(r'{', r'\{')
         .replaceAll(r'}', r'\}')
         .replaceAll(' ', r'\s+'); // Replace spaces with \s+
+    return escaped;
   }
 
   Future<void> previewAndPrintPDF(Uint8List pdfBytes, BuildContext context) async {

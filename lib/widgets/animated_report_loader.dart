@@ -102,20 +102,24 @@ class _AnimatedReportLoaderState extends State<AnimatedReportLoader>
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.auto_awesome, color: Colors.amber.shade300, size: 24),
-                  const SizedBox(width: 10),
-                  const Text(
-                    'AI Report Generation',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5,
+                  Icon(Icons.auto_awesome, color: Colors.amber.shade300, size: 20),
+                  const SizedBox(width: 8),
+                  const Flexible(
+                    child: Text(
+                      'AI Report Generation',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.3,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Icon(Icons.auto_awesome, color: Colors.amber.shade300, size: 24),
+                  const SizedBox(width: 8),
+                  Icon(Icons.auto_awesome, color: Colors.amber.shade300, size: 20),
                 ],
               ),
             ),
@@ -225,13 +229,15 @@ class _AnimatedReportLoaderState extends State<AnimatedReportLoader>
               },
               child: Container(
                 key: ValueKey<String>(widget.currentMessage),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.blue.shade200, width: 1),
                 ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox(
                       width: 20,
@@ -246,11 +252,13 @@ class _AnimatedReportLoaderState extends State<AnimatedReportLoader>
                       child: Text(
                         widget.currentMessage,
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: 13,
                           color: Colors.blue.shade900,
                           fontWeight: FontWeight.w500,
                         ),
                         textAlign: TextAlign.center,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],

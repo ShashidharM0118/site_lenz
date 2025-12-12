@@ -29,11 +29,25 @@ class SpeechAIApp extends StatelessWidget {
       title: 'Site Lenz',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: SplashScreen(
-        child: const LocationScreen(),
+      home: const SplashScreen(
+        child: InitialLocationScreen(),
       ),
       routes: {
         '/main': (context) => const MainNavigationScreen(),
+      },
+    );
+  }
+}
+
+// Initial location screen wrapper
+class InitialLocationScreen extends StatelessWidget {
+  const InitialLocationScreen({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return LocationScreen(
+      onNext: () {
+        Navigator.pushReplacementNamed(context, '/main');
       },
     );
   }

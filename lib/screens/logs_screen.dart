@@ -5,6 +5,7 @@ import '../services/report_generation_service.dart';
 import '../services/image_analysis_service.dart';
 import '../widgets/animated_report_loader.dart';
 import '../theme/app_theme.dart';
+import 'location_screen.dart';
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key});
@@ -517,6 +518,20 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
       return;
     }
 
+    // STEP 1: Show location screen first
+    final locationCaptured = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LocationScreen(
+          onNext: () => Navigator.pop(context, true),
+        ),
+      ),
+    );
+
+    if (locationCaptured != true) {
+      return; // User went back or skipped
+    }
+
     // Check if any logs have transcripts
     bool hasTranscripts = logsWithImages.any((log) => log.transcript.trim().isNotEmpty);
     if (!hasTranscripts) {
@@ -544,7 +559,7 @@ class _LogsScreenState extends State<LogsScreen> with AutomaticKeepAliveClientMi
       }
     }
 
-    // Ask user to choose image analysis provider (Gemini or OpenAI)
+    // STEP 2: Ask user to choose image analysis provider (Gemini or OpenAI)
     ImageAnalysisProvider? selectedProvider;
     final providerChoice = await showDialog<ImageAnalysisProvider>(
       context: context,

@@ -1,298 +1,326 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import '../services/location_service.dart';
+import '../theme/app_theme.dart';
 
 class LocationScreen extends StatefulWidget {
-  const LocationScreen({super.key});
+  final VoidCallback onNext;
+  
+  const LocationScreen({
+    Key? key,
+    required this.onNext,
+  }) : super(key: key);
 
   @override
   State<LocationScreen> createState() => _LocationScreenState();
 }
 
-class _LocationScreenState extends State<LocationScreen>
-    with SingleTickerProviderStateMixin {
+class _LocationScreenState extends State<LocationScreen> {
   final LocationService _locationService = LocationService();
   bool _isLoading = false;
-  String _statusMessage = 'Please allow location access';
+  bool _locationFetched = false;
+  String _displayAddress = '';
+  String _errorMessage = '';
   Map<String, dynamic>? _locationData;
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
-    );
-
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
-    );
-
-    _animationController.forward();
     _checkExistingLocation();
   }
 
   Future<void> _checkExistingLocation() async {
-    final hasLocation = await _locationService.hasLocation();
-    if (hasLocation && mounted) {
-      // Location already exists, navigate directly to main screen
-      Navigator.of(context).pushReplacementNamed('/main');
+    final existingLocation = await _locationService.getSavedLocation();
+    if (existingLocation != null && mounted) {
+      setState(() {
+        _locationData = existingLocation;
+        _displayAddress = existingLocation['fullAddress'] ?? 'Location saved';
+        _locationFetched = true;
+      });
     }
   }
 
-  Future<void> _getLocation() async {
+  Future<void> _fetchLocation() async {
     setState(() {
       _isLoading = true;
-      _statusMessage = 'Requesting location permission...';
+      _errorMessage = '';
     });
 
     try {
-      // Get current position
-      Position? position = await _locationService.getCurrentLocation();
-
+      // Step 1: Get current position (GPS coordinates)
+      final position = await _locationService.getCurrentLocation();
+      
       if (position == null) {
         setState(() {
-          _statusMessage = 'Failed to get location. Please enable location services.';
+          _errorMessage = 'Unable to get location. Check permissions and GPS.';
           _isLoading = false;
         });
         return;
       }
 
-      setState(() {
-        _statusMessage = 'Getting your address...';
-      });
-
-      // Get address from coordinates
-      Map<String, dynamic>? addressData =
-          await _locationService.getAddressFromCoordinates(
+      // Step 2: Convert coordinates to address
+      final locationData = await _locationService.getAddressFromCoordinates(
         position.latitude,
         position.longitude,
       );
-
-      if (addressData == null) {
-        setState(() {
-          _statusMessage = 'Failed to get address. Please try again.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      // Save location
-      await _locationService.saveLocation(addressData);
-
-      setState(() {
-        _locationData = addressData;
-        _statusMessage = 'Location saved successfully!';
-      });
-
-      // Wait a moment to show success message
-      await Future.delayed(const Duration(milliseconds: 1500));
-
-      if (mounted) {
-        // Navigate to main screen
-        Navigator.of(context).pushReplacementNamed('/main');
+      
+      if (locationData != null) {
+        // Step 3: Save location
+        await _locationService.saveLocation(locationData);
+        
+        if (mounted) {
+          setState(() {
+            _locationData = locationData;
+            _displayAddress = locationData['fullAddress'] ?? 
+                             '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
+            _locationFetched = true;
+            _isLoading = false;
+          });
+        }
+      } else {
+        // Coordinates fetched but address lookup failed - still save coordinates
+        final basicLocation = {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'fullAddress': '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
+          'region': 'Unknown',
+        };
+        await _locationService.saveLocation(basicLocation);
+        
+        if (mounted) {
+          setState(() {
+            _locationData = basicLocation;
+            _displayAddress = basicLocation['fullAddress'] as String;
+            _locationFetched = true;
+            _isLoading = false;
+          });
+        }
       }
     } catch (e) {
-      setState(() {
-        _statusMessage = 'Error: ${e.toString()}';
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error: ${e.toString()}';
+          _isLoading = false;
+        });
+      }
     }
   }
 
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
+  void _handleNext() {
+    if (_locationFetched) {
+      widget.onNext();
+    } else {
+      setState(() {
+        _errorMessage = 'Please fetch location before proceeding';
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              const Color(0xFF5F259F),
-              const Color(0xFF5F259F).withOpacity(0.8),
-              const Color(0xFFB8E600).withOpacity(0.3),
-            ],
-          ),
+      appBar: AppBar(
+        title: const Text('Property Location'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
         ),
-        child: SafeArea(
-          child: FadeTransition(
-            opacity: _fadeAnimation,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Location Icon
-                    Container(
-                      padding: const EdgeInsets.all(30),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.3),
-                          width: 2,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header Icon
+              Icon(
+                Icons.location_on_outlined,
+                size: 80,
+                color: AppTheme.primaryPurple,
+              ),
+              const SizedBox(height: 24),
+              
+              // Title
+              Text(
+                'Set Property Location',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              
+              // Description
+              Text(
+                'Fetch the current location to adjust cost estimates for your region',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.textGrey,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 40),
+              
+              // Fetch Location Button
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _fetchLocation,
+                icon: _isLoading 
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(AppTheme.textDark),
                         ),
-                      ),
-                      child: const Icon(
-                        Icons.location_on,
-                        size: 80,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-
-                    // Title
-                    const Text(
-                      'Enable Location',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Description
-                    Text(
-                      'We need your location to provide accurate cost estimates and local contractor recommendations based on your area',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.white.withOpacity(0.9),
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-
-                    // Status Message
-                    if (_isLoading || _locationData != null)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            if (_isLoading)
-                              const CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 3,
-                              ),
-                            const SizedBox(height: 12),
-                            Text(
-                              _statusMessage,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            if (_locationData != null) ...[
-                              const SizedBox(height: 12),
-                              Text(
-                                _locationData!['fullAddress'] ?? '',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white.withOpacity(0.8),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-
-                    const SizedBox(height: 40),
-
-                    // Get Location Button
-                    if (!_isLoading && _locationData == null)
-                      ElevatedButton(
-                        onPressed: _getLocation,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFB8E600),
-                          foregroundColor: const Color(0xFF5F259F),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 48,
-                            vertical: 18,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                          elevation: 8,
-                          shadowColor: Colors.black.withOpacity(0.3),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.my_location, size: 24),
-                            SizedBox(width: 12),
-                            Text(
-                              'GET MY LOCATION',
+                      )
+                    : const Icon(Icons.my_location, size: 24),
+                label: Text(
+                  _isLoading ? 'Fetching Location...' : 'Fetch Current Location',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.accentGreen,
+                  foregroundColor: AppTheme.textDark,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Location Display Card
+              if (_locationFetched) ...[
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryPurple.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.primaryPurple, width: 2),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.check_circle, color: AppTheme.accentGreen, size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Location Captured',
                               style: TextStyle(
                                 fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primaryPurple,
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-
-                    const SizedBox(height: 20),
-
-                    // Skip Button (optional)
-                    if (!_isLoading && _locationData == null)
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(context).pushReplacementNamed('/main');
-                        },
-                        child: Text(
-                          'Skip for now',
+                      const SizedBox(height: 16),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.location_on, color: AppTheme.primaryPurple, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _displayAddress,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppTheme.textDark,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_locationData != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Coordinates: ${_locationData!['latitude']?.toStringAsFixed(6)}, ${_locationData!['longitude']?.toStringAsFixed(6)}',
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.7),
-                            fontSize: 14,
-                            decoration: TextDecoration.underline,
+                            fontSize: 12,
+                            color: AppTheme.textGrey,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              
+              // Error Message
+              if (_errorMessage.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red.shade300, width: 1),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.red.shade700, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _errorMessage,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.red.shade700,
                           ),
                         ),
                       ),
-
-                    const Spacer(),
-
-                    // Info text
-                    Text(
-                      'Your location is stored locally and used only for\ngenerating accurate cost estimates',
-                      textAlign: TextAlign.center,
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              
+              const Spacer(),
+              
+              // Next Button
+              ElevatedButton(
+                onPressed: _locationFetched ? _handleNext : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _locationFetched ? AppTheme.primaryPurple : AppTheme.borderGrey,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  elevation: _locationFetched ? 4 : 0,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'Next',
                       style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white.withOpacity(0.6),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward, size: 20),
                   ],
                 ),
               ),
-            ),
+              const SizedBox(height: 16),
+              
+              // Skip Button
+              TextButton(
+                onPressed: widget.onNext,
+                child: Text(
+                  'Skip for now',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: AppTheme.textGrey,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
